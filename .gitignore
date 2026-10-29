@@ -1,0 +1,32 @@
+# Database (Contains your personal tracking history & notes)
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+*.db
+
+# Project internal instructions / agent blueprints
+PROJECT_INSTRUCTIONS.md
+
+
+# Python & Environment
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.env
+.env.*
+venv/
+env/
+.venv/
+ENV/
+
+# IDE & Editor Settings
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Operating System Files
+.DS_Store
+Thumbs.db
+desktop.ini
