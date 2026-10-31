@@ -6,16 +6,26 @@ from datetime import datetime, date, timedelta
 DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 DB_PATH = os.path.join(DB_DIR, "goalplanner.db")
 
+# Infinity stone categories with fixed color mappings
+CATEGORY_COLORS = {
+    "Mind": "#eab308",    # Yellow
+    "Power": "#a855f7",   # Purple
+    "Reality": "#ef4444", # Red
+    "Soul": "#f97316",    # Orange
+    "Space": "#3b82f6",   # Blue
+    "Time": "#22c55e",    # Green
+}
+
 DEFAULT_TASKS = [
-    {"title": "Goal", "category": "Milestone", "color": "#2563eb", "icon": "flag", "target_frequency": "daily", "sort_order": 0},
-    {"title": "Office", "category": "Work", "color": "#4f46e5", "icon": "briefcase", "target_frequency": "weekdays", "sort_order": 1},
-    {"title": "DSA", "category": "Learning", "color": "#10b981", "icon": "code-2", "target_frequency": "daily", "sort_order": 2},
-    {"title": "System Design", "category": "Learning", "color": "#8b5cf6", "icon": "network", "target_frequency": "daily", "sort_order": 3},
-    {"title": "Development", "category": "Work", "color": "#0ea5e9", "icon": "laptop", "target_frequency": "daily", "sort_order": 4},
-    {"title": "Content", "category": "Creative", "color": "#ec4899", "icon": "video", "target_frequency": "daily", "sort_order": 5},
-    {"title": "Expenses", "category": "Personal", "color": "#f59e0b", "icon": "wallet", "target_frequency": "daily", "sort_order": 6},
-    {"title": "Exercise", "category": "Health", "color": "#16a34a", "icon": "dumbbell", "target_frequency": "daily", "sort_order": 7},
-    {"title": "Cleaning", "category": "Personal", "color": "#06b6d4", "icon": "sparkles", "target_frequency": "daily", "sort_order": 8},
+    {"title": "Goal", "category": "Mind", "color": "#eab308", "icon": "flag", "sort_order": 0},
+    {"title": "Office", "category": "Space", "color": "#3b82f6", "icon": "briefcase", "sort_order": 1},
+    {"title": "DSA", "category": "Time", "color": "#22c55e", "icon": "code-2", "sort_order": 2},
+    {"title": "System Design", "category": "Power", "color": "#a855f7", "icon": "network", "sort_order": 3},
+    {"title": "Development", "category": "Space", "color": "#3b82f6", "icon": "laptop", "sort_order": 4},
+    {"title": "Content", "category": "Soul", "color": "#f97316", "icon": "video", "sort_order": 5},
+    {"title": "Expenses", "category": "Mind", "color": "#eab308", "icon": "wallet", "sort_order": 6},
+    {"title": "Exercise", "category": "Reality", "color": "#ef4444", "icon": "dumbbell", "sort_order": 7},
+    {"title": "Cleaning", "category": "Time", "color": "#22c55e", "icon": "sparkles", "sort_order": 8},
 ]
 
 def get_connection():
@@ -33,8 +43,8 @@ def init_db():
     CREATE TABLE IF NOT EXISTS tasks (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         title TEXT NOT NULL,
-        category TEXT DEFAULT 'General',
-        color TEXT DEFAULT '#3b82f6',
+        category TEXT DEFAULT 'Mind',
+        color TEXT DEFAULT '#eab308',
         icon TEXT DEFAULT 'check-circle',
         target_frequency TEXT DEFAULT 'daily',
         sort_order INTEGER DEFAULT 0,
@@ -64,6 +74,17 @@ def init_db():
     """)
     
     cursor.execute("""
+    CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+    
+    # Initialize goal threshold if not set
+    cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('goal_threshold', '3')")
+    
+    cursor.execute("""
     CREATE TABLE IF NOT EXISTS daily_summaries (
         date TEXT PRIMARY KEY,
         daily_goal_achieved INTEGER DEFAULT 0,
@@ -72,16 +93,175 @@ def init_db():
     )
     """)
     
-    # Check if tasks table is empty. If so, seed defaults.
-    cursor.execute("SELECT COUNT(*) AS cnt FROM tasks")
+    # Check if 'Goal' task exists. If not, insert it as the primary task at sort_order 0
+    cursor.execute("SELECT id FROM tasks WHERE LOWER(TRIM(title)) = 'goal'")
+    goal_row = cursor.fetchone()
+    if not goal_row:
+        cursor.execute("""
+        INSERT INTO tasks (title, category, color, icon, target_frequency, sort_order)
+        VALUES ('Goal', 'Mind', '#eab308', 'flag', 'daily', 0)
+        """)
+        
+    # Check if tasks table is otherwise empty. If so, seed defaults.
+    cursor.execute("SELECT COUNT(*) AS cnt FROM tasks WHERE is_archived = 0")
     count = cursor.fetchone()["cnt"]
-    if count == 0:
+    if count <= 1:
         for t in DEFAULT_TASKS:
+            if t["title"].lower() == "goal":
+                continue
             cursor.execute("""
             INSERT INTO tasks (title, category, color, icon, target_frequency, sort_order)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """, (t["title"], t["category"], t["color"], t["icon"], t["target_frequency"], t["sort_order"]))
+            VALUES (?, ?, ?, ?, 'daily', ?)
+            """, (t["title"], t["category"], t["color"], t["icon"], t["sort_order"]))
     
+    conn.commit()
+    conn.close()
+
+# ----------------- Settings API ----------------- #
+
+def get_setting(key, default="3"):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT value FROM settings WHERE key = ?", (key,))
+    row = cursor.fetchone()
+    conn.close()
+    return row["value"] if row else default
+
+def set_setting(key, value):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+    INSERT INTO settings (key, value, updated_at)
+    VALUES (?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+    """, (key, str(value)))
+    conn.commit()
+    conn.close()
+    
+    # Whenever goal_threshold changes, evaluate all dates for Goal auto-tick
+    if key == "goal_threshold":
+        recalculate_all_goals(int(value))
+    return value
+
+def get_goal_threshold():
+    try:
+        return int(get_setting("goal_threshold", "3"))
+    except ValueError:
+        return 3
+
+# ----------------- Auto Goal Logic ----------------- #
+
+def get_goal_task_id(cursor=None):
+    close_at_end = False
+    if cursor is None:
+        conn = get_connection()
+        cursor = conn.cursor()
+        close_at_end = True
+    cursor.execute("SELECT id FROM tasks WHERE LOWER(TRIM(title)) = 'goal' AND is_archived = 0 LIMIT 1")
+    row = cursor.fetchone()
+    goal_id = row["id"] if row else None
+    if close_at_end:
+        conn.close()
+    return goal_id
+
+def evaluate_goal_for_date(date_str, conn=None):
+    """
+    Evaluates whether 'Goal' should be ticked on a specific date.
+    Counts completions for non-goal active tasks on that date.
+    If count >= threshold, marks Goal as completed (1), else 0.
+    """
+    should_close = False
+    if conn is None:
+        conn = get_connection()
+        should_close = True
+        
+    cursor = conn.cursor()
+    threshold = get_goal_threshold()
+    
+    # 1. Get Goal task ID
+    cursor.execute("SELECT id FROM tasks WHERE LOWER(TRIM(title)) = 'goal' AND is_archived = 0 LIMIT 1")
+    goal_row = cursor.fetchone()
+    if not goal_row:
+        if should_close:
+            conn.close()
+        return False
+        
+    goal_task_id = goal_row["id"]
+    
+    # 2. Count completed tasks on this date excluding Goal
+    cursor.execute("""
+    SELECT COUNT(*) AS cnt
+    FROM completions c
+    JOIN tasks t ON c.task_id = t.id
+    WHERE c.date = ? 
+      AND c.completed = 1 
+      AND t.is_archived = 0
+      AND t.id != ?
+    """, (date_str, goal_task_id))
+    
+    non_goal_completed = cursor.fetchone()["cnt"]
+    goal_state = 1 if non_goal_completed >= threshold else 0
+    
+    # 3. Update or Insert completions record for Goal
+    cursor.execute("""
+    INSERT INTO completions (task_id, date, completed, updated_at)
+    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(task_id, date) DO UPDATE SET completed = excluded.completed, updated_at = CURRENT_TIMESTAMP
+    """, (goal_task_id, date_str, goal_state))
+    
+    # 4. Also update daily_summaries daily_goal_achieved
+    cursor.execute("""
+    INSERT INTO daily_summaries (date, daily_goal_achieved, updated_at)
+    VALUES (?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(date) DO UPDATE SET daily_goal_achieved = excluded.daily_goal_achieved, updated_at = CURRENT_TIMESTAMP
+    """, (date_str, goal_state))
+    
+    conn.commit()
+    if should_close:
+        conn.close()
+    return bool(goal_state)
+
+def recalculate_all_goals(threshold: int):
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT id FROM tasks WHERE LOWER(TRIM(title)) = 'goal' AND is_archived = 0 LIMIT 1")
+    goal_row = cursor.fetchone()
+    if not goal_row:
+        conn.close()
+        return
+    goal_id = goal_row["id"]
+    
+    # Find all distinct dates with any non-goal completions
+    cursor.execute("""
+    SELECT c.date, COUNT(*) as cnt
+    FROM completions c
+    JOIN tasks t ON c.task_id = t.id
+    WHERE c.completed = 1 AND t.is_archived = 0 AND t.id != ?
+    GROUP BY c.date
+    """, (goal_id,))
+    
+    date_counts = {r["date"]: r["cnt"] for r in cursor.fetchall()}
+    
+    # Find all dates that currently have Goal marked 1
+    cursor.execute("SELECT date FROM completions WHERE task_id = ? AND completed = 1", (goal_id,))
+    existing_goal_dates = {r["date"] for r in cursor.fetchall()}
+    
+    all_dates = set(date_counts.keys()).union(existing_goal_dates)
+    for d_str in all_dates:
+        cnt = date_counts.get(d_str, 0)
+        new_state = 1 if cnt >= threshold else 0
+        cursor.execute("""
+        INSERT INTO completions (task_id, date, completed, updated_at)
+        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(task_id, date) DO UPDATE SET completed = excluded.completed, updated_at = CURRENT_TIMESTAMP
+        """, (goal_id, d_str, new_state))
+        cursor.execute("""
+        INSERT INTO daily_summaries (date, daily_goal_achieved, updated_at)
+        VALUES (?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(date) DO UPDATE SET daily_goal_achieved = excluded.daily_goal_achieved, updated_at = CURRENT_TIMESTAMP
+        """, (d_str, new_state))
+        
     conn.commit()
     conn.close()
 
@@ -98,16 +278,25 @@ def get_all_tasks(include_archived=False):
     conn.close()
     return rows
 
-def add_task(title, category="General", color="#3b82f6", icon="check-circle", target_frequency="daily"):
+def add_task(title, category="Mind"):
+    category = category.strip()
+    if category not in CATEGORY_COLORS:
+        category = "Mind"
+    color = CATEGORY_COLORS[category]
+    
+    # Prevent creating duplicate "Goal"
+    if title.strip().lower() == "goal":
+        raise ValueError("Cannot create a task named 'Goal'. 'Goal' is reserved as the main task.")
+        
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_order FROM tasks")
+    cursor.execute("SELECT COALESCE(MAX(sort_order), 0) + 1 AS next_order FROM tasks")
     next_order = cursor.fetchone()["next_order"]
     
     cursor.execute("""
     INSERT INTO tasks (title, category, color, icon, target_frequency, sort_order)
-    VALUES (?, ?, ?, ?, ?, ?)
-    """, (title.strip(), category.strip(), color.strip(), icon.strip(), target_frequency, next_order))
+    VALUES (?, ?, ?, 'check-circle', 'daily', ?)
+    """, (title.strip(), category, color, next_order))
     task_id = cursor.lastrowid
     conn.commit()
     
@@ -116,34 +305,47 @@ def add_task(title, category="General", color="#3b82f6", icon="check-circle", ta
     conn.close()
     return task
 
-def update_task(task_id, title=None, category=None, color=None, icon=None, target_frequency=None, is_archived=None):
+def update_task(task_id, title=None, category=None, is_archived=None):
     conn = get_connection()
     cursor = conn.cursor()
     
+    cursor.execute("SELECT * FROM tasks WHERE id = ?", (task_id,))
+    existing = cursor.fetchone()
+    if not existing:
+        conn.close()
+        return None
+        
+    is_goal = existing["title"].strip().lower() == "goal"
+    
+    # Prevent archiving/deleting the Goal task
+    if is_goal and is_archived:
+        conn.close()
+        raise ValueError("The 'Goal' main task cannot be deleted or archived.")
+        
     fields = []
     values = []
     if title is not None:
+        if is_goal and title.strip().lower() != "goal":
+            conn.close()
+            raise ValueError("Cannot rename the 'Goal' main task.")
         fields.append("title = ?")
         values.append(title.strip())
+        
     if category is not None:
-        fields.append("category = ?")
-        values.append(category.strip())
-    if color is not None:
-        fields.append("color = ?")
-        values.append(color.strip())
-    if icon is not None:
-        fields.append("icon = ?")
-        values.append(icon.strip())
-    if target_frequency is not None:
-        fields.append("target_frequency = ?")
-        values.append(target_frequency)
-    if is_archived is not None:
+        cat = category.strip()
+        if cat in CATEGORY_COLORS:
+            fields.append("category = ?")
+            values.append(cat)
+            fields.append("color = ?")
+            values.append(CATEGORY_COLORS[cat])
+            
+    if is_archived is not None and not is_goal:
         fields.append("is_archived = ?")
         values.append(1 if is_archived else 0)
         
     if not fields:
         conn.close()
-        return None
+        return dict(existing)
         
     values.append(task_id)
     sql = f"UPDATE tasks SET {', '.join(fields)} WHERE id = ?"
@@ -158,6 +360,12 @@ def update_task(task_id, title=None, category=None, color=None, icon=None, targe
 def delete_task(task_id, hard_delete=False):
     conn = get_connection()
     cursor = conn.cursor()
+    cursor.execute("SELECT title FROM tasks WHERE id = ?", (task_id,))
+    row = cursor.fetchone()
+    if row and row["title"].strip().lower() == "goal":
+        conn.close()
+        raise ValueError("The 'Goal' main task cannot be deleted.")
+        
     if hard_delete:
         cursor.execute("DELETE FROM completions WHERE task_id = ?", (task_id,))
         cursor.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
@@ -180,11 +388,23 @@ def reorder_tasks(task_ids):
 
 def toggle_completion(task_id, date_str, target_state=None):
     """
-    Toggles or sets the completion state for a task on a given date (YYYY-MM-DD).
-    Returns (task_id, date_str, completed: bool).
+    Toggles completion for a task.
+    If the task is 'Goal', users are NOT allowed to manually toggle it.
+    Whenever any other task is toggled, Goal is automatically evaluated.
     """
     conn = get_connection()
     cursor = conn.cursor()
+    
+    cursor.execute("SELECT id, title FROM tasks WHERE id = ?", (task_id,))
+    task_row = cursor.fetchone()
+    if not task_row:
+        conn.close()
+        raise ValueError("Task not found")
+        
+    if task_row["title"].strip().lower() == "goal":
+        conn.close()
+        raise ValueError("The 'Goal' main task is automated and cannot be manually toggled.")
+        
     cursor.execute("SELECT completed FROM completions WHERE task_id = ? AND date = ?", (task_id, date_str))
     row = cursor.fetchone()
     
@@ -206,8 +426,17 @@ def toggle_completion(task_id, date_str, target_state=None):
         """, (task_id, date_str, new_state))
         
     conn.commit()
+    
+    # Auto-evaluate 'Goal' for this date
+    goal_completed = evaluate_goal_for_date(date_str, conn=conn)
     conn.close()
-    return {"task_id": task_id, "date": date_str, "completed": bool(new_state)}
+    
+    return {
+        "task_id": task_id,
+        "date": date_str,
+        "completed": bool(new_state),
+        "goal_auto_completed": goal_completed
+    }
 
 def toggle_daily_goal(date_str, target_state=None):
     conn = get_connection()
@@ -251,9 +480,7 @@ def save_daily_note(date_str, note):
 def get_matrix(year: int, month: int):
     """
     Returns the full matrix view for the given year and month.
-    Columns: Day 1..N with day of week, weekend indicator, today indicator.
-    Rows: Each active task with completion array for days 1..N.
-    Summary: Daily total & percentage, Task monthly total & rate.
+    Always ensures Goal is in row 0.
     """
     conn = get_connection()
     cursor = conn.cursor()
@@ -272,14 +499,18 @@ def get_matrix(year: int, month: int):
         days_info.append({
             "day": day,
             "date": date_str,
-            "day_of_week": cur_date.strftime("%a"), # Mon, Tue, etc.
-            "day_letter": cur_date.strftime("%a")[:2], # Mo, Tu, etc.
+            "day_of_week": cur_date.strftime("%a"),
+            "day_letter": cur_date.strftime("%a")[:2],
             "is_weekend": is_weekend,
             "is_today": (date_str == today_str)
         })
         
-    # 2. Get active tasks
-    cursor.execute("SELECT * FROM tasks WHERE is_archived = 0 ORDER BY sort_order ASC, id ASC")
+    # 2. Get active tasks (Ensure 'Goal' is first)
+    cursor.execute("""
+    SELECT * FROM tasks 
+    WHERE is_archived = 0 
+    ORDER BY CASE WHEN LOWER(TRIM(title)) = 'goal' THEN 0 ELSE 1 END, sort_order ASC, id ASC
+    """)
     tasks = [dict(r) for r in cursor.fetchall()]
     
     # 3. Get all completions for this month
@@ -295,7 +526,7 @@ def get_matrix(year: int, month: int):
     for r in cursor.fetchall():
         completed_map.add((r["task_id"], r["date"]))
         
-    # 4. Get daily summaries (e.g. daily goal)
+    # 4. Get daily summaries
     cursor.execute("""
     SELECT date, daily_goal_achieved, focus_note 
     FROM daily_summaries 
@@ -303,47 +534,31 @@ def get_matrix(year: int, month: int):
     """, (start_date, end_date))
     daily_summaries = {r["date"]: dict(r) for r in cursor.fetchall()}
     
+    threshold = get_goal_threshold()
     conn.close()
     
     # 5. Build grid matrix
     task_rows = []
-    daily_counts = [0] * num_days
     
     for task in tasks:
         task_id = task["id"]
         cells = []
         task_total_completed = 0
+        is_goal = task["title"].strip().lower() == "goal"
         
         for idx, d_str in enumerate(day_date_strs):
             is_done = (task_id, d_str) in completed_map
             cells.append(is_done)
             if is_done:
                 task_total_completed += 1
-                daily_counts[idx] += 1
                 
         completion_pct = round((task_total_completed / num_days) * 100, 1) if num_days > 0 else 0
         task_rows.append({
             "task": task,
+            "is_goal": is_goal,
             "cells": cells,
             "total_completed": task_total_completed,
             "completion_percentage": completion_pct
-        })
-        
-    # 6. Build daily progress stats
-    total_active_tasks = len(tasks)
-    daily_stats = []
-    for idx, d_str in enumerate(day_date_strs):
-        done = daily_counts[idx]
-        pct = round((done / total_active_tasks) * 100, 1) if total_active_tasks > 0 else 0
-        summary = daily_summaries.get(d_str, {"daily_goal_achieved": 0, "focus_note": ""})
-        daily_stats.append({
-            "day": idx + 1,
-            "date": d_str,
-            "completed_count": done,
-            "total_tasks": total_active_tasks,
-            "percentage": pct,
-            "daily_goal_achieved": bool(summary.get("daily_goal_achieved", 0)),
-            "focus_note": summary.get("focus_note", "")
         })
         
     return {
@@ -353,23 +568,24 @@ def get_matrix(year: int, month: int):
         "days": days_info,
         "tasks": tasks,
         "matrix": task_rows,
-        "daily_stats": daily_stats,
-        "total_tasks": total_active_tasks,
-        "num_days": num_days
+        "total_tasks": len(tasks),
+        "num_days": num_days,
+        "goal_threshold": threshold
     }
 
 # ----------------- Heatmap & Streaks ----------------- #
 
 def get_heatmap(year: int, task_id: int = None):
     """
-    Returns full year (365/366 days) contribution heatmap data:
-    Every day mapped to count, percentage, and intensity level (0 to 4).
-    Also returns streak statistics.
+    Returns full year contribution heatmap data.
+    IMPORTANT: 'Goal' is completely excluded from heatmap metrics unless explicitly requested.
     """
     conn = get_connection()
     cursor = conn.cursor()
     
-    # 1. Total tasks active
+    goal_id = get_goal_task_id(cursor)
+    
+    # 1. Total tasks target for heatmap (excluding Goal)
     if task_id:
         cursor.execute("SELECT * FROM tasks WHERE id = ?", (task_id,))
         task_row = cursor.fetchone()
@@ -377,10 +593,10 @@ def get_heatmap(year: int, task_id: int = None):
         total_tasks_target = 1
     else:
         filter_task = None
-        cursor.execute("SELECT COUNT(*) AS cnt FROM tasks WHERE is_archived = 0")
+        # Count non-goal active tasks
+        cursor.execute("SELECT COUNT(*) AS cnt FROM tasks WHERE is_archived = 0 AND LOWER(TRIM(title)) != 'goal'")
         total_tasks_target = cursor.fetchone()["cnt"] or 1
         
-    # 2. Query completions for the entire year
     start_date = f"{year:04d}-01-01"
     end_date = f"{year:04d}-12-31"
     
@@ -392,17 +608,18 @@ def get_heatmap(year: int, task_id: int = None):
         GROUP BY date
         """, (start_date, end_date, task_id))
     else:
+        # Exclude Goal from aggregate count
         cursor.execute("""
         SELECT c.date, COUNT(*) AS count
         FROM completions c
         JOIN tasks t ON c.task_id = t.id
-        WHERE c.date >= ? AND c.date <= ? AND c.completed = 1 AND t.is_archived = 0
+        WHERE c.date >= ? AND c.date <= ? AND c.completed = 1 AND t.is_archived = 0 AND LOWER(TRIM(t.title)) != 'goal'
         GROUP BY c.date
         """, (start_date, end_date))
         
     day_counts = {r["date"]: r["count"] for r in cursor.fetchall()}
     
-    # 3. Fetch detailed task names for tooltips
+    # Detailed task names for tooltips (excluding Goal)
     if task_id:
         cursor.execute("""
         SELECT date, t.title
@@ -415,7 +632,7 @@ def get_heatmap(year: int, task_id: int = None):
         SELECT c.date, t.title
         FROM completions c
         JOIN tasks t ON c.task_id = t.id
-        WHERE c.date >= ? AND c.date <= ? AND c.completed = 1 AND t.is_archived = 0
+        WHERE c.date >= ? AND c.date <= ? AND c.completed = 1 AND t.is_archived = 0 AND LOWER(TRIM(t.title)) != 'goal'
         """, (start_date, end_date))
         
     tasks_per_day = {}
@@ -424,7 +641,6 @@ def get_heatmap(year: int, task_id: int = None):
         
     conn.close()
     
-    # 4. Generate all calendar days of the year
     start = date(year, 1, 1)
     end = date(year, 12, 31)
     cur = start
@@ -447,7 +663,6 @@ def get_heatmap(year: int, task_id: int = None):
             
         pct = round((cnt / total_tasks_target) * 100, 1) if total_tasks_target > 0 else 0
         
-        # Intensity level: 0..4 (GitHub standard)
         if cnt == 0:
             level = 0
         elif task_id:
@@ -466,7 +681,7 @@ def get_heatmap(year: int, task_id: int = None):
             "date": d_str,
             "day": cur.day,
             "month": cur.month,
-            "day_of_week": cur.weekday(), # 0=Mon, 6=Sun
+            "day_of_week": cur.weekday(),
             "count": cnt,
             "total_tasks": total_tasks_target,
             "percentage": pct,
@@ -477,7 +692,6 @@ def get_heatmap(year: int, task_id: int = None):
         })
         cur += timedelta(days=1)
         
-    # 5. Compute Streak (Current & Longest)
     longest_streak = 0
     cur_streak_run = 0
     
@@ -492,7 +706,6 @@ def get_heatmap(year: int, task_id: int = None):
         else:
             cur_streak_run = 0
             
-    # Current active streak (checks today and yesterday)
     current_streak = 0
     check_date = today
     if day_counts.get(check_date.isoformat(), 0) == 0:
@@ -518,14 +731,11 @@ def get_heatmap(year: int, task_id: int = None):
 # ----------------- Year Overview & Statistics ----------------- #
 
 def get_yearly_stats(year: int):
-    """
-    Returns high-level statistics for each month of the specified year.
-    """
     conn = get_connection()
     cursor = conn.cursor()
     
-    # Active tasks count
-    cursor.execute("SELECT COUNT(*) AS cnt FROM tasks WHERE is_archived = 0")
+    # Exclude Goal from completion rate
+    cursor.execute("SELECT COUNT(*) AS cnt FROM tasks WHERE is_archived = 0 AND LOWER(TRIM(title)) != 'goal'")
     total_active_tasks = cursor.fetchone()["cnt"] or 1
     
     monthly_data = []
@@ -542,7 +752,7 @@ def get_yearly_stats(year: int):
         SELECT COUNT(*) AS cnt 
         FROM completions c
         JOIN tasks t ON c.task_id = t.id
-        WHERE c.date >= ? AND c.date <= ? AND c.completed = 1 AND t.is_archived = 0
+        WHERE c.date >= ? AND c.date <= ? AND c.completed = 1 AND t.is_archived = 0 AND LOWER(TRIM(t.title)) != 'goal'
         """, (start_date, end_date))
         cnt = cursor.fetchone()["cnt"]
         total_year_completions += cnt
@@ -585,6 +795,9 @@ def export_all():
     cursor.execute("SELECT * FROM completions")
     completions = [dict(r) for r in cursor.fetchall()]
     
+    cursor.execute("SELECT * FROM settings")
+    settings = [dict(r) for r in cursor.fetchall()]
+    
     cursor.execute("SELECT * FROM daily_summaries")
     summaries = [dict(r) for r in cursor.fetchall()]
     
@@ -592,9 +805,10 @@ def export_all():
     
     return {
         "exported_at": datetime.now().isoformat(),
-        "version": "1.0",
+        "version": "2.0",
         "tasks": tasks,
         "completions": completions,
+        "settings": settings,
         "daily_summaries": summaries
     }
 
@@ -604,10 +818,12 @@ def import_backup(data_dict):
     
     if "tasks" in data_dict:
         for t in data_dict["tasks"]:
+            cat = t.get("category", "Mind")
+            col = CATEGORY_COLORS.get(cat, t.get("color", "#eab308"))
             cursor.execute("""
             INSERT OR REPLACE INTO tasks (id, title, category, color, icon, target_frequency, sort_order, is_archived)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (t.get("id"), t.get("title"), t.get("category", "General"), t.get("color", "#3b82f6"),
+            """, (t.get("id"), t.get("title"), cat, col,
                   t.get("icon", "check-circle"), t.get("target_frequency", "daily"),
                   t.get("sort_order", 0), t.get("is_archived", 0)))
                   
@@ -618,6 +834,13 @@ def import_backup(data_dict):
             VALUES (?, ?, ?, ?, ?)
             """, (c.get("id"), c["task_id"], c["date"], c.get("completed", 1), c.get("notes", "")))
             
+    if "settings" in data_dict:
+        for s in data_dict["settings"]:
+            cursor.execute("""
+            INSERT OR REPLACE INTO settings (key, value)
+            VALUES (?, ?)
+            """, (s["key"], s["value"]))
+            
     if "daily_summaries" in data_dict:
         for s in data_dict["daily_summaries"]:
             cursor.execute("""
@@ -627,4 +850,7 @@ def import_backup(data_dict):
             
     conn.commit()
     conn.close()
+    
+    threshold = get_goal_threshold()
+    recalculate_all_goals(threshold)
     return True

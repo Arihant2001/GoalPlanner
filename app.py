@@ -30,42 +30,40 @@ def create_task():
     title = data.get("title", "").strip()
     if not title:
         return jsonify({"success": False, "error": "Task title is required"}), 400
+    if title.lower() == "goal":
+        return jsonify({"success": False, "error": "'Goal' is reserved as the main task and cannot be created."}), 400
         
-    category = data.get("category", "General")
-    color = data.get("color", "#3b82f6")
-    icon = data.get("icon", "check-circle")
-    target_frequency = data.get("target_frequency", "daily")
-    
-    task = database.add_task(
-        title=title,
-        category=category,
-        color=color,
-        icon=icon,
-        target_frequency=target_frequency
-    )
-    return jsonify({"success": True, "task": task}), 201
+    category = data.get("category", "Mind")
+    try:
+        task = database.add_task(title=title, category=category)
+        return jsonify({"success": True, "task": task}), 201
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
 
 @app.route("/api/tasks/<int:task_id>", methods=["PUT"])
 def update_task_endpoint(task_id):
     data = request.get_json() or {}
-    updated = database.update_task(
-        task_id=task_id,
-        title=data.get("title"),
-        category=data.get("category"),
-        color=data.get("color"),
-        icon=data.get("icon"),
-        target_frequency=data.get("target_frequency"),
-        is_archived=data.get("is_archived")
-    )
-    if not updated:
-        return jsonify({"success": False, "error": "Task not found"}), 404
-    return jsonify({"success": True, "task": updated})
+    try:
+        updated = database.update_task(
+            task_id=task_id,
+            title=data.get("title"),
+            category=data.get("category"),
+            is_archived=data.get("is_archived")
+        )
+        if not updated:
+            return jsonify({"success": False, "error": "Task not found"}), 404
+        return jsonify({"success": True, "task": updated})
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
 
 @app.route("/api/tasks/<int:task_id>", methods=["DELETE"])
 def delete_task_endpoint(task_id):
     hard_delete = request.args.get("hard", "false").lower() == "true"
-    database.delete_task(task_id=task_id, hard_delete=hard_delete)
-    return jsonify({"success": True, "message": "Task removed"})
+    try:
+        database.delete_task(task_id=task_id, hard_delete=hard_delete)
+        return jsonify({"success": True, "message": "Task removed"})
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
 
 @app.route("/api/tasks/reorder", methods=["POST"])
 def reorder_tasks_endpoint():
@@ -93,25 +91,36 @@ def toggle_task_completion():
     data = request.get_json() or {}
     task_id = data.get("task_id")
     date_str = data.get("date")
-    state = data.get("state") # optional explicit bool
+    state = data.get("state")
     
     if not task_id or not date_str:
         return jsonify({"success": False, "error": "task_id and date are required"}), 400
         
-    result = database.toggle_completion(task_id=int(task_id), date_str=date_str, target_state=state)
-    return jsonify({"success": True, "result": result})
+    try:
+        result = database.toggle_completion(task_id=int(task_id), date_str=date_str, target_state=state)
+        return jsonify({"success": True, "result": result})
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
 
-@app.route("/api/daily-goal", methods=["POST"])
-def toggle_daily_goal_endpoint():
-    data = request.get_json() or {}
-    date_str = data.get("date")
-    state = data.get("state")
-    
-    if not date_str:
-        return jsonify({"success": False, "error": "date is required"}), 400
-        
-    result = database.toggle_daily_goal(date_str=date_str, target_state=state)
-    return jsonify({"success": True, "result": result})
+@app.route("/api/settings/threshold", methods=["GET", "POST"])
+def goal_threshold_endpoint():
+    if request.method == "POST":
+        data = request.get_json() or {}
+        val = data.get("threshold")
+        if val is None:
+            return jsonify({"success": False, "error": "threshold is required"}), 400
+        try:
+            val = int(val)
+            if val < 1:
+                return jsonify({"success": False, "error": "Threshold must be at least 1"}), 400
+        except ValueError:
+            return jsonify({"success": False, "error": "Threshold must be an integer"}), 400
+            
+        saved_val = database.set_setting("goal_threshold", val)
+        return jsonify({"success": True, "threshold": int(saved_val)})
+    else:
+        threshold = database.get_goal_threshold()
+        return jsonify({"success": True, "threshold": threshold})
 
 @app.route("/api/daily-note", methods=["POST"])
 def save_daily_note_endpoint():
@@ -154,15 +163,13 @@ def export_data():
     if fmt == "json":
         return jsonify(data)
         
-    # Format as CSV matrix
     output = io.StringIO()
     writer = csv.writer(output)
     
-    # Write Tasks
     writer.writerow(["=== TASKS ==="])
     writer.writerow(["ID", "Title", "Category", "Color", "Icon", "Target Frequency", "Sort Order", "Is Archived"])
     for t in data["tasks"]:
-        writer.writerow([t["id"], t["title"], t["category"], t["color"], t["icon"], t["target_frequency"], t["sort_order"], t["is_archived"]])
+        writer.writerow([t["id"], t["title"], t["category"], t["color"], t["icon"], t.get("target_frequency", "daily"), t["sort_order"], t["is_archived"]])
         
     writer.writerow([])
     writer.writerow(["=== COMPLETIONS ==="])

@@ -27,11 +27,21 @@ async function loadMatrix() {
         }
 
         currentMatrixData = json.data;
+
+        // Sync threshold select with backend setting
+        if (currentMatrixData.goal_threshold) {
+            const thresholdSelect = document.getElementById("goal-threshold-select");
+            if (thresholdSelect) thresholdSelect.value = currentMatrixData.goal_threshold;
+            const hint = document.getElementById("threshold-hint-text");
+            if (hint) hint.textContent = `${currentMatrixData.goal_threshold} task${currentMatrixData.goal_threshold > 1 ? 's' : ''}`;
+        }
+
         renderMatrix(currentMatrixData);
 
         // Update last updated text
         const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        document.getElementById("matrix-last-updated").textContent = `Synced at ${timeStr}`;
+        const lastUpdatedEl = document.getElementById("matrix-last-updated");
+        if (lastUpdatedEl) lastUpdatedEl.textContent = `Synced at ${timeStr}`;
 
         // Also refresh heatmap silently in background
         if (window.loadHeatmap) window.loadHeatmap(false);
@@ -47,8 +57,6 @@ function renderMatrix(data) {
     const numDays = data.num_days;
     const days = data.days;
     const taskRows = data.matrix;
-    const dailyStats = data.daily_stats;
-    const totalTasks = data.total_tasks;
 
     let html = "";
 
@@ -57,9 +65,9 @@ function renderMatrix(data) {
     
     // Top-Left Sticky Corner
     html += `
-        <th class="sticky-top-left bg-slate-900 border-r border-slate-800 p-2.5 min-w-[190px] max-w-[210px] text-xs font-bold text-slate-300">
+        <th class="sticky-top-left bg-slate-900 border-r border-slate-800 p-2.5 min-w-[200px] max-w-[220px] text-xs font-bold text-slate-300">
             <div class="flex items-center justify-between">
-                <span class="text-blue-400 font-extrabold tracking-wide uppercase">${data.month_name.slice(0, 3)} ${data.year}</span>
+                <span class="text-amber-400 font-extrabold tracking-wide uppercase">${data.month_name.slice(0, 3)} ${data.year}</span>
                 <span class="text-[10px] text-slate-400 px-1.5 py-0.5 rounded bg-slate-800 font-medium">${taskRows.length} Habits</span>
             </div>
         </th>
@@ -90,8 +98,8 @@ function renderMatrix(data) {
 
     taskRows.forEach((row, rowIndex) => {
         const task = row.task;
-        const isGoalTask = task.title.toLowerCase() === "goal";
-        const rowClass = isGoalTask ? "goal-row" : "hover:bg-slate-800/30";
+        const isGoalTask = row.is_goal || task.title.trim().toLowerCase() === "goal";
+        const rowClass = isGoalTask ? "goal-row bg-amber-500/[0.04]" : "hover:bg-slate-800/30";
 
         html += `<tr class="${rowClass} transition-colors group">`;
 
@@ -100,15 +108,24 @@ function renderMatrix(data) {
             <td class="sticky-col bg-slate-900 group-hover:bg-slate-800/80 border-r border-slate-800 p-2.5 transition-colors">
                 <div class="flex items-center justify-between gap-1.5">
                     <div class="flex items-center gap-2 overflow-hidden">
-                        <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background-color: ${task.color || '#3b82f6'}"></span>
+                        <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background-color: ${task.color || '#eab308'}"></span>
                         <div class="truncate">
-                            <span class="font-bold text-xs sm:text-sm text-slate-100 ${isGoalTask ? 'text-blue-400 font-black' : ''}">${task.title}</span>
-                            <span class="text-[10px] text-slate-400 block truncate">${task.category || 'General'}</span>
+                            <span class="font-bold text-xs sm:text-sm ${isGoalTask ? 'text-amber-400 font-black flex items-center gap-1' : 'text-slate-100'}">
+                                ${isGoalTask ? '<i data-lucide="crown" class="w-3.5 h-3.5 text-amber-400 inline"></i>' : ''}
+                                ${task.title}
+                            </span>
+                            <span class="text-[10px] text-slate-400 block truncate">
+                                ${isGoalTask ? '⭐ Main Daily Goal (Auto-ticks)' : (task.category || 'Mind')}
+                            </span>
                         </div>
                     </div>
+                    ${!isGoalTask ? `
                     <button onclick='openEditTaskModal(${JSON.stringify(task).replace(/'/g, "&apos;")})' class="opacity-0 group-hover:opacity-100 p-1 hover:text-white text-slate-400 rounded transition-opacity" title="Edit Task">
                         <i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i>
                     </button>
+                    ` : `
+                    <span class="text-[10px] text-amber-500/80 px-1 py-0.5 rounded bg-amber-500/10" title="Auto-ticks when target is met">Auto</span>
+                    `}
                 </div>
             </td>
         `;
@@ -119,83 +136,54 @@ function renderMatrix(data) {
             const weekendCellClass = d.is_weekend ? "weekend-cell" : "";
             const todayCellClass = d.is_today ? "today-cell" : "";
 
-            html += `
-                <td class="text-center p-0 border-r border-slate-800/60 ${weekendCellClass} ${todayCellClass}">
-                    <div class="w-full h-full py-1.5 px-0.5 flex items-center justify-center">
-                        <input type="checkbox" 
-                            class="matrix-checkbox" 
-                            ${isDone ? "checked" : ""} 
-                            data-task-id="${task.id}" 
-                            data-date="${d.date}" 
-                            data-row-index="${rowIndex}" 
-                            data-day-index="${dayIndex}"
-                            onchange="onMatrixCellChange(this)"
-                            style="${isDone ? `background-color: ${task.color || '#2563eb'}; border-color: ${task.color || '#2563eb'};` : ''}"
-                            title="${task.title} on ${d.date}">
-                    </div>
-                </td>
-            `;
+            if (isGoalTask) {
+                // Goal task cannot be manually clicked; it is disabled with special goal styling
+                html += `
+                    <td class="text-center p-0 border-r border-slate-800/60 ${weekendCellClass} ${todayCellClass}">
+                        <div class="w-full h-full py-1.5 px-0.5 flex items-center justify-center">
+                            <input type="checkbox" 
+                                id="goal-cell-${dayIndex}"
+                                class="matrix-checkbox goal-checkbox cursor-not-allowed opacity-90" 
+                                ${isDone ? "checked" : ""} 
+                                disabled
+                                style="${isDone ? `background-color: #eab308; border-color: #eab308; box-shadow: 0 0 10px rgba(234, 179, 8, 0.45);` : ''}"
+                                title="Goal on ${d.date}: ${isDone ? 'Achieved!' : 'Complete threshold tasks to achieve'}">
+                        </div>
+                    </td>
+                `;
+            } else {
+                html += `
+                    <td class="text-center p-0 border-r border-slate-800/60 ${weekendCellClass} ${todayCellClass}">
+                        <div class="w-full h-full py-1.5 px-0.5 flex items-center justify-center">
+                            <input type="checkbox" 
+                                class="matrix-checkbox" 
+                                ${isDone ? "checked" : ""} 
+                                data-task-id="${task.id}" 
+                                data-date="${d.date}" 
+                                data-row-index="${rowIndex}" 
+                                data-day-index="${dayIndex}"
+                                onchange="onMatrixCellChange(this)"
+                                style="${isDone ? `background-color: ${task.color || '#3b82f6'}; border-color: ${task.color || '#3b82f6'};` : ''}"
+                                title="${task.title} on ${d.date}">
+                        </div>
+                    </td>
+                `;
+            }
         });
 
         // Right Sticky Cell: Row Total & Percentage
         html += `
             <td id="row-total-${rowIndex}" class="sticky-summary-col bg-slate-900 group-hover:bg-slate-800/80 border-l border-slate-800 p-2 text-center text-xs font-semibold text-slate-200">
-                <span class="font-bold text-white">${row.total_completed}</span>
+                <span class="font-bold ${isGoalTask ? 'text-amber-400' : 'text-white'}">${row.total_completed}</span>
                 <span class="text-slate-500 text-[10px]">/${numDays}</span>
-                <div class="text-[10px] text-blue-400 font-medium">${row.completion_percentage}%</div>
+                <div class="text-[10px] ${isGoalTask ? 'text-amber-400 font-bold' : 'text-blue-400 font-medium'}">${row.completion_percentage}%</div>
             </td>
         `;
 
         html += `</tr>`;
     });
 
-    html += `</tbody>`;
-
-    // 3. TFOOT: Daily Summary Progress Row
-    html += `<tfoot><tr class="bg-slate-900/90 border-t-2 border-slate-800 font-semibold">`;
-
-    // Left Sticky Bottom Corner
-    html += `
-        <td class="sticky-col bg-slate-900 border-r border-slate-800 p-2.5 text-xs font-bold text-slate-300">
-            <div class="flex items-center gap-1.5">
-                <i data-lucide="activity" class="w-3.5 h-3.5 text-emerald-400"></i>
-                <span>Daily Progress</span>
-            </div>
-        </td>
-    `;
-
-    // Day Progress Columns
-    let totalCompletedMonth = 0;
-    days.forEach((d, dayIndex) => {
-        const stat = dailyStats[dayIndex] || { completed_count: 0, total_tasks: totalTasks, percentage: 0 };
-        totalCompletedMonth += stat.completed_count;
-        const weekendCellClass = d.is_weekend ? "weekend-cell" : "";
-        const todayCellClass = d.is_today ? "today-cell" : "";
-        const pctColor = stat.percentage >= 75 ? "bg-emerald-500" : (stat.percentage >= 40 ? "bg-blue-500" : "bg-slate-700");
-
-        html += `
-            <td id="daily-stat-${dayIndex}" class="text-center p-1 border-r border-slate-800/60 ${weekendCellClass} ${todayCellClass}" title="${d.date}: ${stat.completed_count} of ${stat.total_tasks} (${stat.percentage}%)">
-                <div class="text-[10px] font-bold text-slate-200">${stat.completed_count}</div>
-                <div class="w-full bg-slate-800 h-1.5 rounded-full mt-0.5 overflow-hidden">
-                    <div class="${pctColor} h-full rounded-full transition-all duration-300" style="width: ${stat.percentage}%"></div>
-                </div>
-            </td>
-        `;
-    });
-
-    // Right Sticky Bottom Corner (Overall Rate)
-    const maxPossible = numDays * totalTasks;
-    const overallRate = maxPossible > 0 ? Math.round((totalCompletedMonth / maxPossible) * 100) : 0;
-
-    html += `
-        <td id="matrix-overall-rate" class="sticky-summary-col bg-slate-900 border-l border-slate-800 p-2 text-center text-xs font-bold text-emerald-400">
-            ${overallRate}%
-            <div class="text-[9px] text-slate-400 font-normal">avg</div>
-        </td>
-    `;
-
-    html += `</tr></tfoot>`;
-
+    html += `</tbody></table>`;
     table.innerHTML = html;
     lucide.createIcons();
 }
@@ -207,17 +195,16 @@ async function onMatrixCellChange(checkbox) {
     const dayIndex = parseInt(checkbox.dataset.dayIndex);
     const isChecked = checkbox.checked;
 
-    // Optimistic UI updates
     const task = currentMatrixData.matrix[rowIndex].task;
     if (isChecked) {
-        checkbox.style.backgroundColor = task.color || "#2563eb";
-        checkbox.style.borderColor = task.color || "#2563eb";
+        checkbox.style.backgroundColor = task.color || "#3b82f6";
+        checkbox.style.borderColor = task.color || "#3b82f6";
     } else {
         checkbox.style.backgroundColor = "transparent";
         checkbox.style.borderColor = "rgba(148, 163, 184, 0.4)";
     }
 
-    // Update memory representation
+    // Update memory representation for this task
     currentMatrixData.matrix[rowIndex].cells[dayIndex] = isChecked;
 
     // Recalculate row total
@@ -239,25 +226,55 @@ async function onMatrixCellChange(checkbox) {
         `;
     }
 
-    // Recalculate daily stat
-    let newDayDone = 0;
-    currentMatrixData.matrix.forEach(r => {
-        if (r.cells[dayIndex]) newDayDone++;
-    });
-    const totalTasks = currentMatrixData.total_tasks;
-    const newDayPct = totalTasks > 0 ? Math.round((newDayDone / totalTasks) * 100) : 0;
-    currentMatrixData.daily_stats[dayIndex].completed_count = newDayDone;
-    currentMatrixData.daily_stats[dayIndex].percentage = newDayPct;
+    // Evaluate Goal auto-tick on client side for immediate feedback
+    const threshold = currentMatrixData.goal_threshold || 3;
+    let nonGoalDoneOnThisDay = 0;
+    let goalRowIndex = -1;
 
-    const dayStatCell = document.getElementById(`daily-stat-${dayIndex}`);
-    if (dayStatCell) {
-        const pctColor = newDayPct >= 75 ? "bg-emerald-500" : (newDayPct >= 40 ? "bg-blue-500" : "bg-slate-700");
-        dayStatCell.innerHTML = `
-            <div class="text-[10px] font-bold text-slate-200">${newDayDone}</div>
-            <div class="w-full bg-slate-800 h-1.5 rounded-full mt-0.5 overflow-hidden">
-                <div class="${pctColor} h-full rounded-full transition-all duration-300" style="width: ${newDayPct}%"></div>
-            </div>
-        `;
+    currentMatrixData.matrix.forEach((r, idx) => {
+        if (r.is_goal || r.task.title.trim().toLowerCase() === "goal") {
+            goalRowIndex = idx;
+        } else {
+            if (r.cells[dayIndex]) nonGoalDoneOnThisDay++;
+        }
+    });
+
+    const shouldGoalBeDone = nonGoalDoneOnThisDay >= threshold;
+    if (goalRowIndex !== -1) {
+        currentMatrixData.matrix[goalRowIndex].cells[dayIndex] = shouldGoalBeDone;
+        
+        // Update Goal checkbox element on this day
+        const goalCheckbox = document.getElementById(`goal-cell-${dayIndex}`);
+        if (goalCheckbox) {
+            goalCheckbox.checked = shouldGoalBeDone;
+            if (shouldGoalBeDone) {
+                goalCheckbox.style.backgroundColor = "#eab308";
+                goalCheckbox.style.borderColor = "#eab308";
+                goalCheckbox.style.boxShadow = "0 0 10px rgba(234, 179, 8, 0.45)";
+            } else {
+                goalCheckbox.style.backgroundColor = "transparent";
+                goalCheckbox.style.borderColor = "rgba(148, 163, 184, 0.4)";
+                goalCheckbox.style.boxShadow = "none";
+            }
+        }
+
+        // Update Goal Row Total
+        let goalTotal = 0;
+        currentMatrixData.matrix[goalRowIndex].cells.forEach(c => {
+            if (c) goalTotal++;
+        });
+        const goalPct = Math.round((goalTotal / numDays) * 100 * 10) / 10;
+        currentMatrixData.matrix[goalRowIndex].total_completed = goalTotal;
+        currentMatrixData.matrix[goalRowIndex].completion_percentage = goalPct;
+
+        const goalRowTotalCell = document.getElementById(`row-total-${goalRowIndex}`);
+        if (goalRowTotalCell) {
+            goalRowTotalCell.innerHTML = `
+                <span class="font-bold text-amber-400">${goalTotal}</span>
+                <span class="text-slate-500 text-[10px]">/${numDays}</span>
+                <div class="text-[10px] text-amber-400 font-bold">${goalPct}%</div>
+            `;
+        }
     }
 
     // Send async backend request
@@ -273,15 +290,15 @@ async function onMatrixCellChange(checkbox) {
         });
         const json = await res.json();
         if (!json.success) {
-            showToast("Failed to save checkmark", "error");
+            showToast(json.error || "Failed to save checkmark", "error");
             checkbox.checked = !isChecked; // revert
         } else {
-            // Silently update heatmap and streak if in cache
+            // Silently update heatmap in background
             if (window.loadHeatmap) window.loadHeatmap(false);
         }
     } catch (err) {
         showToast("Network error syncing task", "error");
-        checkbox.checked = !isChecked; // revert
+        checkbox.checked = !isChecked;
     }
 }
 

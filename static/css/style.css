@@ -107,7 +107,7 @@ html:not(.dark) .border-slate-700 {
     background-color: transparent;
 }
 
-.matrix-checkbox:hover {
+.matrix-checkbox:hover:not(:disabled) {
     border-color: #3b82f6;
     transform: scale(1.1);
 }
@@ -127,9 +127,14 @@ html:not(.dark) .border-slate-700 {
     transform: rotate(-45deg) translate(1px, -1px);
 }
 
-/* Goal Row Checkbox (Highlighted Blue) */
+/* Goal Row Checkbox & Highlighting */
 .goal-row {
-    background: linear-gradient(90deg, rgba(37, 99, 235, 0.08), transparent);
+    background: linear-gradient(90deg, rgba(234, 179, 8, 0.12), rgba(234, 179, 8, 0.02));
+    border-bottom: 2px solid rgba(234, 179, 8, 0.25) !important;
+}
+
+.goal-checkbox:disabled {
+    cursor: not-allowed;
 }
 
 /* Weekend Tinting */

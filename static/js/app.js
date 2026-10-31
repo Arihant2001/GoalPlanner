@@ -1,3 +1,13 @@
+// Category to Color Mapping (6 Infinity Stone Themes)
+const CATEGORY_COLORS = {
+    "Mind": "#eab308",    // Yellow
+    "Power": "#a855f7",   // Purple
+    "Reality": "#ef4444", // Red
+    "Soul": "#f97316",    // Orange
+    "Space": "#3b82f6",   // Blue
+    "Time": "#22c55e",    // Green
+};
+
 // Global Application State
 const state = {
     currentYear: new Date().getFullYear(),
@@ -6,6 +16,7 @@ const state = {
     selectedDateStr: new Date().toISOString().split("T")[0],
     activeView: "matrix",
     tasks: [],
+    goalThreshold: 3,
     streak: 0
 };
 
@@ -13,6 +24,7 @@ document.addEventListener("DOMContentLoaded", () => {
     initTheme();
     initStateFromUI();
     loadTasks();
+    loadThreshold();
     switchView("matrix");
 });
 
@@ -26,6 +38,47 @@ function initStateFromUI() {
     if (yearSelect) yearSelect.value = state.currentYear;
     if (heatmapYearSelect) heatmapYearSelect.value = state.currentYear;
     if (yearlySelect) yearlySelect.value = state.currentYear;
+}
+
+// ----------------- Goal Threshold Management ----------------- //
+
+async function loadThreshold() {
+    try {
+        const res = await fetch("/api/settings/threshold");
+        const json = await res.json();
+        if (json.success) {
+            state.goalThreshold = json.threshold;
+            const thresholdSelect = document.getElementById("goal-threshold-select");
+            if (thresholdSelect) thresholdSelect.value = json.threshold;
+            const hint = document.getElementById("threshold-hint-text");
+            if (hint) hint.textContent = `${json.threshold} task${json.threshold > 1 ? 's' : ''}`;
+        }
+    } catch (err) {
+        console.error("Failed to load threshold", err);
+    }
+}
+
+async function updateGoalThreshold(newThreshold) {
+    state.goalThreshold = parseInt(newThreshold);
+    try {
+        const res = await fetch("/api/settings/threshold", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ threshold: state.goalThreshold })
+        });
+        const json = await res.json();
+        if (json.success) {
+            showToast(`Goal target updated to ${state.goalThreshold} tasks`, "success");
+            const hint = document.getElementById("threshold-hint-text");
+            if (hint) hint.textContent = `${state.goalThreshold} task${state.goalThreshold > 1 ? 's' : ''}`;
+            if (window.loadMatrix) window.loadMatrix();
+            if (state.activeView === "today") loadTodayChecklist();
+        } else {
+            showToast(json.error || "Failed to update threshold", "error");
+        }
+    } catch (err) {
+        showToast("Network error updating goal target", "error");
+    }
 }
 
 // ----------------- View Navigation ----------------- //
@@ -121,8 +174,10 @@ function populateHeatmapTaskFilter() {
     if (!select) return;
 
     const currentVal = select.value;
-    select.innerHTML = '<option value="all">⚡ All Habits (Aggregate)</option>';
+    select.innerHTML = '<option value="all">⚡ All Habits (Aggregate - Goal Excluded)</option>';
     state.tasks.forEach(task => {
+        // Exclude Goal from habit filter list
+        if (task.title.trim().toLowerCase() === "goal") return;
         const opt = document.createElement("option");
         opt.value = task.id;
         opt.textContent = `${task.title} (${task.category})`;
@@ -131,27 +186,41 @@ function populateHeatmapTaskFilter() {
     select.value = currentVal || "all";
 }
 
+function onCategorySelectChange(category) {
+    const color = CATEGORY_COLORS[category] || "#eab308";
+    const dot = document.getElementById("category-preview-dot");
+    const title = document.getElementById("category-preview-title");
+    if (dot) dot.style.backgroundColor = color;
+    if (title) title.textContent = `${category} Stone Badge (${color})`;
+}
+
 function openAddTaskModal() {
     document.getElementById("task-modal-title").innerHTML = '<i data-lucide="plus-circle" class="w-5 h-5 text-blue-400"></i> Add New Task';
     document.getElementById("task-id-input").value = "";
     document.getElementById("task-title-input").value = "";
-    document.getElementById("task-category-input").value = "General";
-    document.getElementById("task-frequency-input").value = "daily";
+    document.getElementById("task-title-input").disabled = false;
+    document.getElementById("task-category-select").value = "Mind";
     document.getElementById("task-delete-btn").classList.add("hidden");
-    selectColor("#3b82f6");
+    onCategorySelectChange("Mind");
 
     document.getElementById("task-modal").classList.remove("hidden");
     lucide.createIcons();
 }
 
 function openEditTaskModal(task) {
+    const isGoal = task.title.trim().toLowerCase() === "goal";
+    if (isGoal) {
+        showToast("The 'Goal' main task cannot be edited or deleted.", "info");
+        return;
+    }
+
     document.getElementById("task-modal-title").innerHTML = '<i data-lucide="edit-3" class="w-5 h-5 text-blue-400"></i> Edit Task';
     document.getElementById("task-id-input").value = task.id;
     document.getElementById("task-title-input").value = task.title;
-    document.getElementById("task-category-input").value = task.category || "General";
-    document.getElementById("task-frequency-input").value = task.target_frequency || "daily";
+    document.getElementById("task-title-input").disabled = false;
+    document.getElementById("task-category-select").value = task.category || "Mind";
     document.getElementById("task-delete-btn").classList.remove("hidden");
-    selectColor(task.color || "#3b82f6");
+    onCategorySelectChange(task.category || "Mind");
 
     document.getElementById("task-modal").classList.remove("hidden");
     lucide.createIcons();
@@ -161,28 +230,18 @@ function closeTaskModal() {
     document.getElementById("task-modal").classList.add("hidden");
 }
 
-function selectColor(hex) {
-    document.getElementById("task-color-input").value = hex;
-    document.querySelectorAll("#color-palette-picker button").forEach(btn => {
-        btn.classList.remove("ring-2", "ring-offset-2", "ring-offset-slate-900", "ring-blue-500");
-    });
-    const clickedBtn = Array.from(document.querySelectorAll("#color-palette-picker button")).find(
-        b => b.getAttribute("onclick") && b.getAttribute("onclick").includes(hex)
-    );
-    if (clickedBtn) {
-        clickedBtn.classList.add("ring-2", "ring-offset-2", "ring-offset-slate-900", "ring-blue-500");
-    }
-}
-
 async function handleTaskSubmit(event) {
     event.preventDefault();
     const taskId = document.getElementById("task-id-input").value;
     const title = document.getElementById("task-title-input").value.trim();
-    const category = document.getElementById("task-category-input").value.trim() || "General";
-    const targetFrequency = document.getElementById("task-frequency-input").value;
-    const color = document.getElementById("task-color-input").value;
+    const category = document.getElementById("task-category-select").value;
 
-    const payload = { title, category, target_frequency: targetFrequency, color };
+    if (title.toLowerCase() === "goal") {
+        showToast("Cannot create or rename task to 'Goal' — it is reserved.", "error");
+        return;
+    }
+
+    const payload = { title, category };
 
     try {
         let res;
@@ -219,7 +278,7 @@ async function handleTaskDelete() {
     const taskId = document.getElementById("task-id-input").value;
     if (!taskId) return;
 
-    if (!confirm("Are you sure you want to remove this task? Past completion history will be archived.")) {
+    if (!confirm("Are you sure you want to remove this task?")) {
         return;
     }
 
@@ -232,6 +291,8 @@ async function handleTaskDelete() {
             await loadTasks();
             if (window.loadMatrix) window.loadMatrix();
             if (state.activeView === "today") loadTodayChecklist();
+        } else {
+            showToast(data.error || "Could not delete task", "error");
         }
     } catch (err) {
         showToast("Error deleting task", "error");
@@ -252,7 +313,6 @@ async function loadTodayChecklist() {
     const d = new Date(state.selectedDateStr);
     const isToday = state.selectedDateStr === state.todayDateStr;
 
-    // Header date labels
     const options = { weekday: "long", month: "short", day: "numeric", year: "numeric" };
     document.getElementById("today-header-date").textContent = isToday ? "Today" : d.toLocaleDateString(undefined, { weekday: "long" });
     document.getElementById("today-sub-date").textContent = d.toLocaleDateString(undefined, options);
@@ -260,7 +320,6 @@ async function loadTodayChecklist() {
     container.innerHTML = '<div class="text-center py-6 text-slate-500">Loading tasks...</div>';
 
     try {
-        // Fetch matrix for that day's month
         const year = d.getFullYear();
         const month = d.getMonth() + 1;
         const res = await fetch(`/api/matrix?year=${year}&month=${month}`);
@@ -270,20 +329,66 @@ async function loadTodayChecklist() {
 
         const matrixData = json.data;
         const dayIdx = d.getDate() - 1;
-        const dailyStat = matrixData.daily_stats[dayIdx] || { completed_count: 0, total_tasks: 0, percentage: 0 };
+        const threshold = matrixData.goal_threshold || 3;
+
+        // Count completed non-goal tasks
+        let nonGoalCompleted = 0;
+        let nonGoalTotal = 0;
+        let goalIsCompleted = false;
+
+        matrixData.matrix.forEach(row => {
+            const isGoal = row.is_goal || row.task.title.trim().toLowerCase() === "goal";
+            const isDone = row.cells[dayIdx] || false;
+            if (isGoal) {
+                goalIsCompleted = isDone;
+            } else {
+                nonGoalTotal++;
+                if (isDone) nonGoalCompleted++;
+            }
+        });
 
         // Update progress ring
-        updateProgressRing(dailyStat.completed_count, dailyStat.total_tasks, dailyStat.percentage);
-
-        // Daily note input
-        document.getElementById("today-note-input").value = dailyStat.focus_note || "";
+        const pct = nonGoalTotal > 0 ? Math.round((nonGoalCompleted / nonGoalTotal) * 100) : 0;
+        updateProgressRing(nonGoalCompleted, nonGoalTotal, pct);
 
         container.innerHTML = "";
 
+        // Render Goal Card at top (Non-clickable, automatic)
+        const goalCard = document.createElement("div");
+        goalCard.className = `p-4 rounded-2xl border transition-all ${
+            goalIsCompleted 
+            ? "bg-amber-500/10 border-amber-500/40 shadow-lg shadow-amber-500/10" 
+            : "bg-slate-900/60 border-slate-800"
+        }`;
+        goalCard.innerHTML = `
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <div class="w-9 h-9 rounded-xl ${goalIsCompleted ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-amber-400'} flex items-center justify-center font-bold">
+                        <i data-lucide="crown" class="w-5 h-5"></i>
+                    </div>
+                    <div>
+                        <div class="font-bold text-sm text-white flex items-center gap-1.5">
+                            Daily Goal
+                            <span class="text-[10px] px-1.5 py-0.5 rounded-full ${goalIsCompleted ? 'bg-amber-400 text-slate-950 font-bold' : 'bg-slate-800 text-slate-400'}">
+                                ${goalIsCompleted ? 'ACHIEVED' : `${nonGoalCompleted}/${threshold} to unlock`}
+                            </span>
+                        </div>
+                        <div class="text-[11px] text-slate-400">
+                            ${goalIsCompleted ? '🎉 Target reached! Main goal unlocked.' : `Complete any ${threshold} tasks today to automatically achieve.`}
+                        </div>
+                    </div>
+                </div>
+                <input type="checkbox" ${goalIsCompleted ? 'checked' : ''} disabled class="matrix-checkbox pointer-events-none opacity-90" style="${goalIsCompleted ? 'background-color: #eab308; border-color: #eab308;' : ''}">
+            </div>
+        `;
+        container.appendChild(goalCard);
+
+        // Render remaining tasks
         matrixData.matrix.forEach(row => {
             const task = row.task;
-            const isCompleted = row.cells[dayIdx] || false;
+            if (row.is_goal || task.title.trim().toLowerCase() === "goal") return;
 
+            const isCompleted = row.cells[dayIdx] || false;
             const card = document.createElement("div");
             card.className = `flex items-center justify-between p-3.5 rounded-xl border transition-all cursor-pointer select-none ${
                 isCompleted 
@@ -296,7 +401,7 @@ async function loadTodayChecklist() {
                     <div class="w-3.5 h-3.5 rounded-full" style="background-color: ${task.color || '#3b82f6'}"></div>
                     <div>
                         <div class="font-semibold text-sm ${isCompleted ? 'line-through text-slate-400' : 'text-white'}">${task.title}</div>
-                        <div class="text-[11px] text-slate-400">${task.category} • ${task.target_frequency}</div>
+                        <div class="text-[11px] text-slate-400">${task.category}</div>
                     </div>
                 </div>
                 <input type="checkbox" ${isCompleted ? 'checked' : ''} class="matrix-checkbox pointer-events-none" style="${isCompleted ? `background-color: ${task.color}; border-color: ${task.color};` : ''}">
@@ -305,6 +410,8 @@ async function loadTodayChecklist() {
             card.onclick = () => toggleTodayItem(task.id, isCompleted);
             container.appendChild(card);
         });
+
+        lucide.createIcons();
 
     } catch (err) {
         console.error(err);
@@ -338,7 +445,7 @@ function updateProgressRing(completed, total, percentage) {
     document.getElementById("today-percentage-text").textContent = `${Math.round(percentage)}%`;
 
     const ring = document.getElementById("today-progress-ring");
-    const circumference = 163.36; // 2 * pi * 26
+    const circumference = 163.36;
     const offset = circumference - (percentage / 100) * circumference;
     ring.style.strokeDashoffset = offset;
 }
@@ -384,7 +491,7 @@ async function loadYearlyOverview() {
             const isBest = m.month_name === data.best_month && data.best_month_rate > 0;
             const card = document.createElement("div");
             card.className = `p-4 rounded-2xl border transition-all cursor-pointer ${
-                isBest ? 'bg-gradient-to-br from-blue-900/30 to-slate-900 border-blue-500/40 shadow-lg' : 'bg-slate-900 border-slate-800 hover:border-slate-700'
+                isBest ? 'bg-gradient-to-br from-amber-900/20 to-slate-900 border-amber-500/40 shadow-lg' : 'bg-slate-900 border-slate-800 hover:border-slate-700'
             }`;
 
             card.onclick = () => {
@@ -397,12 +504,12 @@ async function loadYearlyOverview() {
             card.innerHTML = `
                 <div class="flex items-center justify-between mb-2">
                     <span class="font-bold text-sm text-white">${m.month_name}</span>
-                    ${isBest ? '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30">🏆 Best Month</span>' : ''}
+                    ${isBest ? '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30">🏆 Best Month</span>' : ''}
                 </div>
                 <div class="text-2xl font-black text-white mt-1">${m.completion_rate}%</div>
                 <div class="text-xs text-slate-400 mt-0.5">${m.completions} of ${m.max_possible} tasks</div>
                 <div class="w-full bg-slate-800 h-2 rounded-full mt-3 overflow-hidden">
-                    <div class="bg-blue-500 h-full rounded-full transition-all duration-500" style="width: ${m.completion_rate}%"></div>
+                    <div class="bg-amber-400 h-full rounded-full transition-all duration-500" style="width: ${m.completion_rate}%"></div>
                 </div>
             `;
             container.appendChild(card);
@@ -444,6 +551,7 @@ async function handleBackupImport() {
             showToast("Backup restored successfully!", "success");
             closeBackupModal();
             loadTasks();
+            loadThreshold();
             if (window.loadMatrix) window.loadMatrix();
         } else {
             showToast(data.error || "Failed to restore backup", "error");

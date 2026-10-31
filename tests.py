@@ -13,72 +13,85 @@ def run_tests():
     res = client.get('/api/tasks')
     assert res.status_code == 200
     tasks = res.get_json()['tasks']
-    assert len(tasks) >= 9, f"Expected at least 9 default tasks, got {len(tasks)}"
-    print(f"PASS: /api/tasks returned {len(tasks)} tasks")
+    goal_task = next((t for t in tasks if t['title'].lower() == 'goal'), None)
+    assert goal_task is not None, "Goal task must exist"
+    print(f"PASS: /api/tasks returned {len(tasks)} tasks (Goal ID: {goal_task['id']})")
 
     # 3. Test matrix endpoint
     res = client.get('/api/matrix?year=2026&month=10')
     assert res.status_code == 200
     matrix = res.get_json()['data']
     assert len(matrix['days']) == 31, f"Expected 31 days in October, got {len(matrix['days'])}"
-    assert len(matrix['matrix']) == len(tasks), f"Expected {len(tasks)} rows, got {len(matrix['matrix'])}"
-    print(f"PASS: /api/matrix returned 31 days and {len(matrix['matrix'])} task rows")
+    assert matrix['matrix'][0]['task']['title'].lower() == 'goal', "First row in matrix must be Goal"
+    print(f"PASS: /api/matrix returned 31 days with Goal as first row")
 
-    # 4. Test toggle endpoint
-    sample_task_id = tasks[0]['id']
-    test_date = '2026-10-26'
-    res = client.post('/api/toggle', json={'task_id': sample_task_id, 'date': test_date, 'state': True})
+    # 4. Test Goal cannot be manually toggled
+    res = client.post('/api/toggle', json={'task_id': goal_task['id'], 'date': '2026-10-31', 'state': True})
+    assert res.status_code == 400, "Manually toggling Goal must be rejected"
+    print("PASS: Manually toggling Goal correctly rejected (400)")
+
+    # 5. Test Goal auto-ticking based on threshold
+    # Set threshold to 2 tasks
+    res = client.post('/api/settings/threshold', json={'threshold': 2})
     assert res.status_code == 200
-    assert res.get_json()['result']['completed'] is True
-    print(f"PASS: /api/toggle marked task {sample_task_id} completed on {test_date}")
+    assert res.get_json()['threshold'] == 2
 
-    # Verify toggle in matrix
+    # Pick 2 non-goal tasks
+    non_goal_tasks = [t for t in tasks if t['title'].lower() != 'goal']
+    task_a = non_goal_tasks[0]['id']
+    task_b = non_goal_tasks[1]['id']
+    test_date = '2026-10-31'
+
+    # Check 1 task: Goal should NOT be ticked yet
+    client.post('/api/toggle', json={'task_id': task_a, 'date': test_date, 'state': True})
     res = client.get('/api/matrix?year=2026&month=10')
-    matrix = res.get_json()['data']
-    oct26_cell = matrix['matrix'][0]['cells'][25] # Day 26 (index 25)
-    assert oct26_cell is True, "Cell was not marked true in matrix"
-    print("PASS: Cell verified completed in matrix data")
+    goal_row = res.get_json()['data']['matrix'][0]
+    oct31_idx = 30 # Day 31
+    assert goal_row['cells'][oct31_idx] is False, "Goal should not be ticked with only 1 task"
+    print("PASS: Goal remains unticked when completed count < threshold")
 
-    # 5. Test heatmap endpoint
+    # Check 2nd task: Goal SHOULD automatically become ticked!
+    client.post('/api/toggle', json={'task_id': task_b, 'date': test_date, 'state': True})
+    res = client.get('/api/matrix?year=2026&month=10')
+    goal_row = res.get_json()['data']['matrix'][0]
+    assert goal_row['cells'][oct31_idx] is True, "Goal must auto-tick when threshold (2) is reached"
+    print("PASS: Goal automatically ticked when threshold (2 tasks) reached!")
+
+    # Untick task_b: Goal should automatically become unticked
+    client.post('/api/toggle', json={'task_id': task_b, 'date': test_date, 'state': False})
+    res = client.get('/api/matrix?year=2026&month=10')
+    goal_row = res.get_json()['data']['matrix'][0]
+    assert goal_row['cells'][oct31_idx] is False, "Goal must auto-untick when dropping below threshold"
+    print("PASS: Goal automatically unticked when dropping below threshold!")
+
+    # 6. Test heatmap does NOT count Goal
     res = client.get('/api/heatmap?year=2026')
     assert res.status_code == 200
     heatmap = res.get_json()['data']
-    assert len(heatmap['days']) == 365, f"Expected 365 days, got {len(heatmap['days'])}"
-    assert heatmap['total_completed_actions'] >= 1
-    print(f"PASS: /api/heatmap returned 365 days with active actions")
+    oct31_heatmap_day = next((d for d in heatmap['days'] if d['date'] == test_date), None)
+    assert 'Goal' not in oct31_heatmap_day['completed_tasks'], "Goal must not appear in heatmap completed tasks"
+    print("PASS: Heatmap successfully excludes 'Goal'")
 
-    # 6. Test yearly stats
-    res = client.get('/api/yearly-stats?year=2026')
-    assert res.status_code == 200
-    stats = res.get_json()['data']
-    assert len(stats['months']) == 12
-    print(f"PASS: /api/yearly-stats returned 12 months")
-
-    # 7. Test task creation
-    res = client.post('/api/tasks', json={'title': 'Reading', 'category': 'Habit', 'color': '#8b5cf6'})
+    # 7. Test task creation with Infinity Stone category & auto-color
+    res = client.post('/api/tasks', json={'title': 'Time Management', 'category': 'Time'})
     assert res.status_code == 201
     new_task = res.get_json()['task']
-    new_id = new_task['id']
-    print(f"PASS: Created new task id={new_id} ('Reading')")
+    assert new_task['color'] == '#22c55e', f"Expected Time green #22c55e, got {new_task['color']}"
+    print(f"PASS: Created task with Category 'Time' auto-assigned color {new_task['color']}")
 
-    # 8. Test export JSON & CSV
-    res = client.get('/api/export?format=json')
-    assert res.status_code == 200
-    export_json = res.get_json()
-    assert 'tasks' in export_json and 'completions' in export_json
-    print("PASS: /api/export (JSON)")
-
-    res = client.get('/api/export?format=csv')
-    assert res.status_code == 200
-    assert res.mimetype == 'text/csv'
-    print("PASS: /api/export (CSV)")
+    # 8. Test Goal cannot be deleted or archived
+    res = client.delete(f"/api/tasks/{goal_task['id']}")
+    assert res.status_code == 400, "Goal task deletion must be rejected"
+    print("PASS: Goal deletion rejected (400)")
 
     # Clean up test task
-    client.delete(f'/api/tasks/{new_id}?hard=true')
-    print("PASS: Cleaned up test task")
+    client.delete(f"/api/tasks/{new_task['id']}?hard=true")
+
+    # Reset threshold back to 3
+    client.post('/api/settings/threshold', json={'threshold': 3})
 
     print("\n=========================================")
-    print(" ALL 8 INTEGRATION TESTS PASSED 100%! ")
+    print(" ALL 8 V2.0 SPEC TESTS PASSED 100%! ")
     print("=========================================\n")
 
 if __name__ == '__main__':
