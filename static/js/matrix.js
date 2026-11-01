@@ -100,18 +100,22 @@ function renderMatrix(data) {
         const task = row.task;
         const isGoalTask = row.is_goal || task.title.trim().toLowerCase() === "goal";
         const isFullDayTask = row.is_full_day || task.title.trim().toLowerCase() === "full day";
+        const isSubtask = Boolean(row.is_subtask || task.parent_id);
         const isFixedRow = isGoalTask || isFullDayTask;
+        const isDraggable = !isFixedRow && !isSubtask;
         
         let rowClass = "hover:bg-slate-800/30";
         if (isGoalTask) {
             rowClass = "goal-row bg-amber-500/[0.04]";
         } else if (isFullDayTask) {
             rowClass = "bg-amber-500/[0.02] hover:bg-amber-500/[0.05]";
+        } else if (isSubtask) {
+            rowClass = "bg-slate-900/40 hover:bg-slate-800/50";
         }
 
-        const draggableAttr = !isFixedRow 
+        const draggableAttr = isDraggable 
             ? `draggable="true" data-task-id="${task.id}" data-row-index="${rowIndex}" ondragstart="onTaskDragStart(event)" ondragover="onTaskDragOver(event)" ondragleave="onTaskDragLeave(event)" ondrop="onTaskDrop(event)" ondragend="onTaskDragEnd(event)"` 
-            : `data-task-id="${task.id}" data-row-index="${rowIndex}" ondragover="onFixedRowDragOver(event)" ondragleave="onFixedRowDragLeave(event)" ondrop="onFixedRowDrop(event)"`;
+            : `data-task-id="${task.id}" data-row-index="${rowIndex}" ${isFixedRow ? 'ondragover="onFixedRowDragOver(event)" ondragleave="onFixedRowDragLeave(event)" ondrop="onFixedRowDrop(event)"' : ''}`;
 
         html += `<tr id="task-row-${task.id}" class="${rowClass} transition-colors group select-none" ${draggableAttr}>`;
 
@@ -119,26 +123,34 @@ function renderMatrix(data) {
         html += `
             <td class="sticky-col bg-slate-900 group-hover:bg-slate-800/80 border-r border-slate-800 p-2.5 transition-colors">
                 <div class="flex items-center justify-between gap-1.5">
-                    <div class="flex items-center gap-2 overflow-hidden flex-1">
-                        ${!isFixedRow ? `
+                    <div class="flex items-center gap-2 overflow-hidden flex-1 ${isSubtask ? 'pl-6' : ''}">
+                        ${isDraggable ? `
                         <div class="drag-handle p-1 text-slate-500 hover:text-white rounded transition-colors flex items-center justify-center opacity-40 group-hover:opacity-100" title="Drag to reorder task position">
                             <i data-lucide="grip-vertical" class="w-3.5 h-3.5"></i>
                         </div>
                         ` : ''}
-                        <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background-color: ${task.color || '#eab308'}"></span>
+                        ${isSubtask ? `<span class="text-slate-500 font-bold text-xs select-none">↳</span>` : ''}
+                        <span class="${isSubtask ? 'w-2 h-2' : 'w-2.5 h-2.5'} rounded-full flex-shrink-0" style="background-color: ${task.color || (isSubtask ? '#94a3b8' : '#eab308')}"></span>
                         <div class="truncate flex-1">
-                            <span class="font-bold text-xs sm:text-sm ${isGoalTask ? 'text-amber-400 font-black flex items-center gap-1' : (isFullDayTask ? 'text-amber-300 font-bold flex items-center gap-1' : 'text-slate-100')}">
+                            <span class="font-bold text-xs sm:text-sm ${isGoalTask ? 'text-amber-400 font-black flex items-center gap-1' : (isFullDayTask ? 'text-amber-300 font-bold flex items-center gap-1' : (isSubtask ? 'text-slate-200 font-medium' : 'text-slate-100'))}">
                                 ${isGoalTask ? '<i data-lucide="crown" class="w-3.5 h-3.5 text-amber-400 inline"></i>' : ''}
                                 ${isFullDayTask ? '<i data-lucide="sun" class="w-3.5 h-3.5 text-amber-400 inline"></i>' : ''}
                                 ${task.title}
                             </span>
-                            ${!isFixedRow ? `<span class="text-[10px] text-slate-400 block truncate">${task.category || 'General'}</span>` : ''}
+                            ${!isFixedRow ? (isSubtask ? `<span class="text-[10px] text-slate-500 block truncate font-medium">Subtask</span>` : `<span class="text-[10px] text-slate-400 block truncate">${task.category || 'General'}</span>`) : ''}
                         </div>
                     </div>
                     ${!isFixedRow ? `
-                    <button draggable="false" onclick='openEditTaskModal(${JSON.stringify(task).replace(/'/g, "&apos;")})' class="opacity-0 group-hover:opacity-100 p-1 hover:text-white text-slate-400 rounded transition-opacity" title="Edit Task">
-                        <i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i>
-                    </button>
+                    <div class="flex items-center gap-0.5">
+                        ${!isSubtask ? `
+                        <button draggable="false" onclick='openAddSubtaskModal(${task.id}, "${task.title.replace(/"/g, '&quot;')}")' class="opacity-0 group-hover:opacity-100 p-1 hover:text-emerald-400 text-slate-400 rounded transition-all" title="Add Subtask">
+                            <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+                        </button>
+                        ` : ''}
+                        <button draggable="false" onclick='openEditTaskModal(${JSON.stringify(task).replace(/'/g, "&apos;")})' class="opacity-0 group-hover:opacity-100 p-1 hover:text-white text-slate-400 rounded transition-opacity" title="${isSubtask ? 'Edit Subtask' : 'Edit Task'}">
+                            <i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i>
+                        </button>
+                    </div>
                     ` : (isGoalTask ? `
                     <span class="text-[10px] text-amber-500/80 px-1 py-0.5 rounded bg-amber-500/10 font-medium" title="Auto-ticks when target is met or Full Day is checked">Auto</span>
                     ` : `
@@ -258,6 +270,30 @@ async function onMatrixCellChange(checkbox) {
         rowTotalCell.innerHTML = `<span class="font-bold text-white text-sm">${newRowTotal}</span><span class="text-slate-500 text-[11px] font-normal">/${numDays}</span>`;
     }
 
+    // Automatic parent tick: ticking the checkbox of a subtask automatically ticks the parent!
+    if (task.parent_id && isChecked) {
+        const parentRowIndex = currentMatrixData.matrix.findIndex(r => r.task.id === task.parent_id);
+        if (parentRowIndex !== -1) {
+            const parentRow = currentMatrixData.matrix[parentRowIndex];
+            if (!parentRow.cells[dayIndex]) {
+                parentRow.cells[dayIndex] = true;
+                const parentCb = document.querySelector(`input[data-task-id="${task.parent_id}"][data-day-index="${dayIndex}"]`);
+                if (parentCb) {
+                    parentCb.checked = true;
+                    parentCb.style.backgroundColor = parentRow.task.color || "#3b82f6";
+                    parentCb.style.borderColor = parentRow.task.color || "#3b82f6";
+                }
+                let pTotal = 0;
+                parentRow.cells.forEach(c => { if (c) pTotal++; });
+                parentRow.total_completed = pTotal;
+                const pTotalEl = document.getElementById(`row-total-${parentRowIndex}`);
+                if (pTotalEl) {
+                    pTotalEl.innerHTML = `<span class="font-bold text-white text-sm">${pTotal}</span><span class="text-slate-500 text-[11px] font-normal">/${numDays}</span>`;
+                }
+            }
+        }
+    }
+
     // Evaluate Goal auto-tick on client side for instantaneous UI feedback
     const threshold = currentMatrixData.goal_threshold || 3;
     let regularDoneOnThisDay = 0;
@@ -270,7 +306,7 @@ async function onMatrixCellChange(checkbox) {
             goalRowIndex = idx;
         } else if (tTitle === "full day") {
             isFullDayCheckedOnThisDay = Boolean(r.cells[dayIndex]);
-        } else {
+        } else if (!r.task.parent_id) { // Top-level tasks count towards daily Goal threshold
             if (r.cells[dayIndex]) regularDoneOnThisDay++;
         }
     });
@@ -401,7 +437,7 @@ async function onTaskDrop(e) {
     const regularTasks = currentMatrixData.matrix
         .filter(r => {
             const title = r.task.title.trim().toLowerCase();
-            return title !== 'goal' && title !== 'full day';
+            return !r.task.parent_id && title !== 'goal' && title !== 'full day';
         })
         .map(r => r.task);
 
@@ -458,7 +494,7 @@ async function onFixedRowDrop(e) {
     const regularTasks = currentMatrixData.matrix
         .filter(r => {
             const title = r.task.title.trim().toLowerCase();
-            return title !== 'goal' && title !== 'full day';
+            return !r.task.parent_id && title !== 'goal' && title !== 'full day';
         })
         .map(r => r.task);
 

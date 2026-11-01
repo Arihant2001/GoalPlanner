@@ -111,8 +111,58 @@ def run_tests():
         assert m_res['matrix'][2]['task']['id'] == reversed_ids[0]
         print("PASS: /api/tasks/reorder keeps Goal/Full Day fixed and shifts regular tasks")
 
+    # 8. Test level-1 nesting of tasks and automatic parent ticking
+    # Create parent task 'Office'
+    res = client.post('/api/tasks', json={'title': 'Office', 'category': 'Power'})
+    assert res.status_code == 201
+    office_task = res.get_json()['task']
+    office_id = office_task['id']
+
+    # Create subtask 'POC' under 'Office'
+    res = client.post('/api/tasks', json={'title': 'POC', 'parent_id': office_id})
+    assert res.status_code == 201
+    poc_task = res.get_json()['task']
+    assert poc_task['parent_id'] == office_id
+    assert poc_task['category'] == ''  # No category
+    print("PASS: Created level-1 subtask 'POC' under 'Office' with no category")
+
+    # Creating subtask inside 'POC' must fail (level-1 max depth constraint)
+    res = client.post('/api/tasks', json={'title': 'NestedInsidePOC', 'parent_id': poc_task['id']})
+    assert res.status_code == 400
+    print("PASS: Level-1 max depth enforced: creating subtask inside 'POC' is blocked")
+
+    # Creating subtask under 'Goal' or 'Full Day' must fail
+    res = client.post('/api/tasks', json={'title': 'SubGoal', 'parent_id': goal_task['id']})
+    assert res.status_code == 400
+    print("PASS: Creating subtask under system tasks (Goal/Full Day) is blocked")
+
+    # Test automatic ticking: ticking 'POC' should automatically tick 'Office'
+    test_nest_date = '2026-11-20'
+    res = client.post('/api/toggle', json={'task_id': poc_task['id'], 'date': test_nest_date, 'state': True})
+    assert res.status_code == 200
+
+    # Verify 'Office' is now marked completed for test_nest_date
+    m_res = client.get('/api/matrix?year=2026&month=11').get_json()['data']
+    office_row = next(r for r in m_res['matrix'] if r['task']['id'] == office_id)
+    poc_row = next(r for r in m_res['matrix'] if r['task']['id'] == poc_task['id'])
+    
+    # 20th of November is index 19
+    assert poc_row['cells'][19] is True, "POC subtask should be checked"
+    assert office_row['cells'][19] is True, "Office parent task should be automatically checked when POC is ticked"
+    print("PASS: Ticking subtask 'POC' automatically ticked parent task 'Office'!")
+
+    # Verify subtask 'POC' appears directly under 'Office' in matrix
+    office_idx = next(i for i, r in enumerate(m_res['matrix']) if r['task']['id'] == office_id)
+    poc_idx = next(i for i, r in enumerate(m_res['matrix']) if r['task']['id'] == poc_task['id'])
+    assert poc_idx == office_idx + 1, "Subtask POC must appear directly beneath its parent Office"
+    print("PASS: Subtask POC is rendered directly below parent Office")
+
+    # Clean up test tasks
+    client.delete(f'/api/tasks/{poc_task["id"]}?hard=true')
+    client.delete(f'/api/tasks/{office_id}?hard=true')
+
     print("\n=========================================")
-    print(" ALL 7 SPEC & REGRESSION TESTS PASSED 100%! ")
+    print(" ALL 8 SPEC & REGRESSION TESTS PASSED 100%! ")
     print("=========================================\n")
 
 if __name__ == '__main__':

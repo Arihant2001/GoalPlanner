@@ -356,13 +356,47 @@ function onCategorySelectChange(category) {
 function openAddTaskModal() {
     document.getElementById("task-modal-title").innerHTML = '<i data-lucide="plus-circle" class="w-5 h-5 text-blue-400"></i> Add New Task';
     document.getElementById("task-id-input").value = "";
+    document.getElementById("task-parent-id-input").value = "";
     document.getElementById("task-title-input").value = "";
     document.getElementById("task-title-input").disabled = false;
     document.getElementById("task-delete-btn").classList.add("hidden");
+    document.getElementById("task-add-subtask-modal-btn").classList.add("hidden");
+    document.getElementById("task-parent-info").classList.add("hidden");
+    document.getElementById("task-category-group").classList.remove("hidden");
 
     populateCategoryDropdowns();
     document.getElementById("task-modal").classList.remove("hidden");
     lucide.createIcons();
+}
+
+function openAddSubtaskModal(parentId, parentTitle) {
+    document.getElementById("task-modal-title").innerHTML = '<i data-lucide="corner-down-right" class="w-5 h-5 text-emerald-400"></i> Add Subtask';
+    document.getElementById("task-id-input").value = "";
+    document.getElementById("task-parent-id-input").value = parentId;
+    document.getElementById("task-title-input").value = "";
+    document.getElementById("task-title-input").disabled = false;
+    document.getElementById("task-delete-btn").classList.add("hidden");
+    document.getElementById("task-add-subtask-modal-btn").classList.add("hidden");
+    
+    // Subtasks have no category
+    document.getElementById("task-category-group").classList.add("hidden");
+    
+    const infoText = document.getElementById("task-parent-info-text");
+    if (infoText) {
+        infoText.innerHTML = `Adding subtask to <strong class="text-white">${parentTitle}</strong>. Subtasks have no category and will automatically tick <strong class="text-white">${parentTitle}</strong> when completed.`;
+    }
+    document.getElementById("task-parent-info").classList.remove("hidden");
+
+    document.getElementById("task-modal").classList.remove("hidden");
+    lucide.createIcons();
+    setTimeout(() => document.getElementById("task-title-input").focus(), 100);
+}
+
+function openAddSubtaskFromEditModal() {
+    const parentId = document.getElementById("task-id-input").value;
+    const parentTitle = document.getElementById("task-title-input").value;
+    if (!parentId) return;
+    openAddSubtaskModal(parentId, parentTitle);
 }
 
 function openEditTaskModal(task) {
@@ -372,18 +406,37 @@ function openEditTaskModal(task) {
         return;
     }
 
-    document.getElementById("task-modal-title").innerHTML = '<i data-lucide="edit-3" class="w-5 h-5 text-blue-400"></i> Edit Task';
+    const isSubtask = Boolean(task.parent_id);
     document.getElementById("task-id-input").value = task.id;
     document.getElementById("task-title-input").value = task.title;
     document.getElementById("task-title-input").disabled = false;
     document.getElementById("task-delete-btn").classList.remove("hidden");
 
-    populateCategoryDropdowns();
-    const catSelect = document.getElementById("task-category-select");
-    if (catSelect && task.category) {
-        catSelect.value = task.category;
+    if (isSubtask) {
+        document.getElementById("task-modal-title").innerHTML = '<i data-lucide="corner-down-right" class="w-5 h-5 text-blue-400"></i> Edit Subtask';
+        document.getElementById("task-parent-id-input").value = task.parent_id;
+        document.getElementById("task-category-group").classList.add("hidden");
+        document.getElementById("task-add-subtask-modal-btn").classList.add("hidden"); // Cannot nest subtasks inside subtask!
+
+        const infoText = document.getElementById("task-parent-info-text");
+        if (infoText) {
+            infoText.innerHTML = `Subtask row. Ticking this subtask automatically ticks the parent task.`;
+        }
+        document.getElementById("task-parent-info").classList.remove("hidden");
+    } else {
+        document.getElementById("task-modal-title").innerHTML = '<i data-lucide="edit-3" class="w-5 h-5 text-blue-400"></i> Edit Task';
+        document.getElementById("task-parent-id-input").value = "";
+        document.getElementById("task-category-group").classList.remove("hidden");
+        document.getElementById("task-add-subtask-modal-btn").classList.remove("hidden"); // Can add subtask to parent!
+        document.getElementById("task-parent-info").classList.add("hidden");
+
+        populateCategoryDropdowns();
+        const catSelect = document.getElementById("task-category-select");
+        if (catSelect && task.category) {
+            catSelect.value = task.category;
+        }
+        onCategorySelectChange(catSelect ? catSelect.value : "");
     }
-    onCategorySelectChange(catSelect ? catSelect.value : "");
 
     document.getElementById("task-modal").classList.remove("hidden");
     lucide.createIcons();
@@ -396,15 +449,21 @@ function closeTaskModal() {
 async function handleTaskSubmit(event) {
     event.preventDefault();
     const taskId = document.getElementById("task-id-input").value;
+    const parentId = document.getElementById("task-parent-id-input").value;
     const title = document.getElementById("task-title-input").value.trim();
-    const category = document.getElementById("task-category-select").value;
 
-    if (title.toLowerCase() === "goal") {
-        showToast("Cannot create or rename task to 'Goal' — it is reserved.", "error");
+    if (title.toLowerCase() === "goal" || title.toLowerCase() === "full day") {
+        showToast("Cannot create or rename task to reserved names.", "error");
         return;
     }
 
-    const payload = { title, category };
+    const payload = { title };
+    if (parentId) {
+        payload.parent_id = parseInt(parentId);
+        payload.category = "";
+    } else {
+        payload.category = document.getElementById("task-category-select").value;
+    }
 
     try {
         let res;
@@ -424,7 +483,7 @@ async function handleTaskSubmit(event) {
 
         const data = await res.json();
         if (data.success) {
-            showToast(taskId ? "Task updated!" : "Task created successfully!", "success");
+            showToast(taskId ? (parentId ? "Subtask updated!" : "Task updated!") : (parentId ? "Subtask created!" : "Task created!"), "success");
             closeTaskModal();
             await loadTasks();
             if (window.loadMatrix) window.loadMatrix();
@@ -506,7 +565,7 @@ async function loadTodayChecklist() {
                 goalIsCompleted = isDone;
             } else if (tTitle === "full day") {
                 fullDayIsCompleted = isDone;
-            } else {
+            } else if (!row.task.parent_id) {
                 regularTotal++;
                 if (isDone) regularCompleted++;
             }
@@ -558,9 +617,12 @@ async function loadTodayChecklist() {
             const task = row.task;
             if (row.is_goal || task.title.trim().toLowerCase() === "goal") return;
 
+            const isSubtask = Boolean(task.parent_id);
             const isCompleted = row.cells[dayIdx] || false;
             const card = document.createElement("div");
             card.className = `flex items-center justify-between p-3.5 rounded-xl border transition-all cursor-pointer select-none ${
+                isSubtask ? "ml-6 pl-4 border-l-2 border-l-slate-700 " : ""
+            }${
                 isCompleted 
                 ? "bg-slate-900/90 border-emerald-500/30 text-white shadow-sm" 
                 : "bg-slate-900/40 border-slate-800 text-slate-300 hover:border-slate-700"
@@ -568,13 +630,14 @@ async function loadTodayChecklist() {
 
             card.innerHTML = `
                 <div class="flex items-center gap-3">
-                    <div class="w-3.5 h-3.5 rounded-full" style="background-color: ${task.color || '#3b82f6'}"></div>
+                    ${isSubtask ? '<span class="text-slate-500 font-bold text-xs">↳</span>' : ''}
+                    <div class="${isSubtask ? 'w-2.5 h-2.5' : 'w-3.5 h-3.5'} rounded-full flex-shrink-0" style="background-color: ${task.color || '#3b82f6'}"></div>
                     <div>
                         <div class="font-semibold text-sm ${isCompleted ? 'line-through text-slate-400' : 'text-white'}">${task.title}</div>
-                        <div class="text-[11px] text-slate-400">${task.category}</div>
+                        <div class="text-[11px] text-slate-400">${isSubtask ? '<span class="text-slate-500">Subtask</span>' : (task.category || 'General')}</div>
                     </div>
                 </div>
-                <input type="checkbox" ${isCompleted ? 'checked' : ''} class="matrix-checkbox pointer-events-none" style="${isCompleted ? `background-color: ${task.color}; border-color: ${task.color};` : ''}">
+                <input type="checkbox" ${isCompleted ? 'checked' : ''} class="matrix-checkbox pointer-events-none" style="${isCompleted ? `background-color: ${task.color || '#3b82f6'}; border-color: ${task.color || '#3b82f6'};` : ''}">
             `;
 
             card.onclick = () => toggleTodayItem(task.id, isCompleted);
@@ -783,3 +846,11 @@ function showToast(message, type = "info") {
         setTimeout(() => toast.remove(), 300);
     }, 3200);
 }
+
+window.openAddTaskModal = openAddTaskModal;
+window.openAddSubtaskModal = openAddSubtaskModal;
+window.openAddSubtaskFromEditModal = openAddSubtaskFromEditModal;
+window.openEditTaskModal = openEditTaskModal;
+window.closeTaskModal = closeTaskModal;
+window.handleTaskSubmit = handleTaskSubmit;
+window.handleTaskDelete = handleTaskDelete;

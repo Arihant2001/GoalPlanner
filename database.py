@@ -70,9 +70,19 @@ def init_db():
         target_frequency TEXT DEFAULT 'daily',
         sort_order INTEGER DEFAULT 0,
         is_archived INTEGER DEFAULT 0,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        parent_id INTEGER DEFAULT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (parent_id) REFERENCES tasks(id) ON DELETE CASCADE
     )
     """)
+    
+    # Auto-migration: ensure parent_id exists in existing tasks table
+    cursor.execute("PRAGMA table_info(tasks)")
+    cols = [r["name"] for r in cursor.fetchall()]
+    if "parent_id" not in cols:
+        cursor.execute("ALTER TABLE tasks ADD COLUMN parent_id INTEGER DEFAULT NULL REFERENCES tasks(id) ON DELETE CASCADE")
+        
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasks_parent_id ON tasks(parent_id)")
     
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS completions (
@@ -322,19 +332,20 @@ def evaluate_goal_for_date(date_str, conn=None):
         f_row = cursor.fetchone()
         full_day_checked = bool(f_row and f_row["completed"] == 1)
         
-    # Count completed regular tasks (excluding Goal and Full Day)
+    # Count completed regular top-level tasks (excluding Goal, Full Day, and subtasks)
     excluded_ids = [goal_id]
     if full_day_id:
         excluded_ids.append(full_day_id)
         
     placeholders = ",".join("?" for _ in excluded_ids)
     cursor.execute(f"""
-    SELECT COUNT(*) AS cnt
+    SELECT COUNT(DISTINCT t.id) AS cnt
     FROM completions c
     JOIN tasks t ON c.task_id = t.id
     WHERE c.date = ? 
       AND c.completed = 1 
       AND t.is_archived = 0
+      AND t.parent_id IS NULL
       AND t.id NOT IN ({placeholders})
     """, [date_str] + excluded_ids)
     
@@ -379,12 +390,12 @@ def recalculate_all_goals(threshold: int):
         excluded_ids.append(full_day_id)
     placeholders = ",".join("?" for _ in excluded_ids)
     
-    # Dates with regular completions
+    # Dates with regular completions (top-level tasks only)
     cursor.execute(f"""
-    SELECT c.date, COUNT(*) as cnt
+    SELECT c.date, COUNT(DISTINCT t.id) as cnt
     FROM completions c
     JOIN tasks t ON c.task_id = t.id
-    WHERE c.completed = 1 AND t.is_archived = 0 AND t.id NOT IN ({placeholders})
+    WHERE c.completed = 1 AND t.is_archived = 0 AND t.parent_id IS NULL AND t.id NOT IN ({placeholders})
     GROUP BY c.date
     """, excluded_ids)
     date_counts = {r["date"]: r["cnt"] for r in cursor.fetchall()}
@@ -424,47 +435,85 @@ def recalculate_all_goals(threshold: int):
 def get_all_tasks(include_archived=False):
     conn = get_connection()
     cursor = conn.cursor()
-    if include_archived:
-        cursor.execute("""
-        SELECT * FROM tasks 
-        ORDER BY 
-            CASE WHEN LOWER(TRIM(title)) = 'goal' THEN 0 
-                 WHEN LOWER(TRIM(title)) = 'full day' THEN 1 
-                 ELSE 2 END,
-            sort_order ASC, id ASC
-        """)
-    else:
-        cursor.execute("""
-        SELECT * FROM tasks 
-        WHERE is_archived = 0 
-        ORDER BY 
-            CASE WHEN LOWER(TRIM(title)) = 'goal' THEN 0 
-                 WHEN LOWER(TRIM(title)) = 'full day' THEN 1 
-                 ELSE 2 END,
-            sort_order ASC, id ASC
-        """)
-    rows = [dict(r) for r in cursor.fetchall()]
-    conn.close()
-    return rows
-
-def add_task(title, category="General"):
-    category = category.strip()
-    color_map = get_category_color_map()
-    color = color_map.get(category, "#3b82f6")
     
+    top_arch = "" if include_archived else "AND is_archived = 0"
+    cursor.execute(f"""
+    SELECT * FROM tasks 
+    WHERE parent_id IS NULL {top_arch}
+    ORDER BY 
+        CASE WHEN LOWER(TRIM(title)) = 'goal' THEN 0 
+             WHEN LOWER(TRIM(title)) = 'full day' THEN 1 
+             ELSE 2 END,
+        sort_order ASC, id ASC
+    """)
+    parents = [dict(r) for r in cursor.fetchall()]
+    
+    sub_arch = "" if include_archived else "AND is_archived = 0"
+    cursor.execute(f"""
+    SELECT * FROM tasks 
+    WHERE parent_id IS NOT NULL {sub_arch}
+    ORDER BY sort_order ASC, id ASC
+    """)
+    subtasks = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    
+    subtasks_by_parent = {}
+    for st in subtasks:
+        subtasks_by_parent.setdefault(st["parent_id"], []).append(st)
+        
+    ordered = []
+    for p in parents:
+        ordered.append(p)
+        if p["id"] in subtasks_by_parent:
+            ordered.extend(subtasks_by_parent[p["id"]])
+            
+    return ordered
+
+def add_task(title, category="General", parent_id=None):
     clean_title = title.strip().lower()
     if clean_title in ("goal", "full day"):
         raise ValueError(f"Cannot create task named '{title}'. It is a reserved system task.")
         
     conn = get_connection()
     cursor = conn.cursor()
+    
+    if parent_id is not None:
+        try:
+            parent_id = int(parent_id)
+        except (ValueError, TypeError):
+            conn.close()
+            raise ValueError("Invalid parent task ID.")
+            
+        cursor.execute("SELECT * FROM tasks WHERE id = ? AND is_archived = 0", (parent_id,))
+        parent_task = cursor.fetchone()
+        if not parent_task:
+            conn.close()
+            raise ValueError("Parent task does not exist or is archived.")
+            
+        p_clean = parent_task["title"].strip().lower()
+        if p_clean in ("goal", "full day"):
+            conn.close()
+            raise ValueError("Cannot create subtasks for system tasks (Goal or Full Day).")
+            
+        # Strict level-1 nesting constraint
+        if parent_task["parent_id"] is not None:
+            conn.close()
+            raise ValueError("Subtasks cannot have nested subtasks (maximum 1 level of nesting allowed).")
+            
+        category = ""
+        color = parent_task["color"] or "#94a3b8"
+    else:
+        category = category.strip()
+        color_map = get_category_color_map()
+        color = color_map.get(category, "#3b82f6")
+        
     cursor.execute("SELECT COALESCE(MAX(sort_order), 1) + 1 AS next_order FROM tasks")
     next_order = cursor.fetchone()["next_order"]
     
     cursor.execute("""
-    INSERT INTO tasks (title, category, color, icon, target_frequency, sort_order)
-    VALUES (?, ?, ?, 'check-circle', 'daily', ?)
-    """, (title.strip(), category, color, next_order))
+    INSERT INTO tasks (title, category, color, icon, target_frequency, sort_order, parent_id)
+    VALUES (?, ?, ?, 'check-circle', 'daily', ?, ?)
+    """, (title.strip(), category, color, next_order, parent_id))
     task_id = cursor.lastrowid
     conn.commit()
     
@@ -485,6 +534,7 @@ def update_task(task_id, title=None, category=None, is_archived=None):
         
     clean_title = existing["title"].strip().lower()
     is_protected = clean_title in ("goal", "full day")
+    is_subtask = existing["parent_id"] is not None
     
     if is_protected and is_archived:
         conn.close()
@@ -499,7 +549,7 @@ def update_task(task_id, title=None, category=None, is_archived=None):
         fields.append("title = ?")
         values.append(title.strip())
         
-    if category is not None:
+    if category is not None and not is_subtask:
         cat = category.strip()
         color_map = get_category_color_map()
         color = color_map.get(cat, "#3b82f6")
@@ -519,6 +569,10 @@ def update_task(task_id, title=None, category=None, is_archived=None):
     values.append(task_id)
     sql = f"UPDATE tasks SET {', '.join(fields)} WHERE id = ?"
     cursor.execute(sql, values)
+    
+    if is_archived and not is_subtask:
+        cursor.execute("UPDATE tasks SET is_archived = 1 WHERE parent_id = ?", (task_id,))
+        
     conn.commit()
     
     cursor.execute("SELECT * FROM tasks WHERE id = ?", (task_id,))
@@ -529,17 +583,18 @@ def update_task(task_id, title=None, category=None, is_archived=None):
 def delete_task(task_id, hard_delete=False):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT title FROM tasks WHERE id = ?", (task_id,))
+    cursor.execute("SELECT title, parent_id FROM tasks WHERE id = ?", (task_id,))
     row = cursor.fetchone()
     if row and row["title"].strip().lower() in ("goal", "full day"):
         conn.close()
         raise ValueError(f"The '{row['title']}' task cannot be deleted.")
         
     if hard_delete:
-        cursor.execute("DELETE FROM completions WHERE task_id = ?", (task_id,))
+        cursor.execute("DELETE FROM completions WHERE task_id = ? OR task_id IN (SELECT id FROM tasks WHERE parent_id = ?)", (task_id, task_id))
+        cursor.execute("DELETE FROM tasks WHERE parent_id = ?", (task_id,))
         cursor.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
     else:
-        cursor.execute("UPDATE tasks SET is_archived = 1 WHERE id = ?", (task_id,))
+        cursor.execute("UPDATE tasks SET is_archived = 1 WHERE id = ? OR parent_id = ?", (task_id, task_id))
     conn.commit()
     conn.close()
     return True
@@ -578,7 +633,7 @@ def toggle_completion(task_id, date_str, target_state=None):
     conn = get_connection()
     cursor = conn.cursor()
     
-    cursor.execute("SELECT id, title FROM tasks WHERE id = ?", (task_id,))
+    cursor.execute("SELECT id, title, parent_id FROM tasks WHERE id = ?", (task_id,))
     task_row = cursor.fetchone()
     if not task_row:
         conn.close()
@@ -608,6 +663,15 @@ def toggle_completion(task_id, date_str, target_state=None):
         VALUES (?, ?, ?)
         """, (task_id, date_str, new_state))
         
+    # Automatic parent tick: ticking the checkbox of a subtask automatically ticks the parent!
+    parent_id = task_row["parent_id"]
+    if parent_id and new_state == 1:
+        cursor.execute("""
+        INSERT INTO completions (task_id, date, completed, updated_at)
+        VALUES (?, ?, 1, CURRENT_TIMESTAMP)
+        ON CONFLICT(task_id, date) DO UPDATE SET completed = 1, updated_at = CURRENT_TIMESTAMP
+        """, (parent_id, date_str))
+        
     conn.commit()
     goal_completed = evaluate_goal_for_date(date_str, conn=conn)
     conn.close()
@@ -616,6 +680,7 @@ def toggle_completion(task_id, date_str, target_state=None):
         "task_id": task_id,
         "date": date_str,
         "completed": bool(new_state),
+        "parent_id": parent_id,
         "goal_auto_completed": goal_completed
     }
 
@@ -681,17 +746,8 @@ def get_matrix(year: int, month: int):
             "is_today": (date_str == today_str)
         })
         
-    # Ensure Goal is 0, Full Day is 1, followed by others
-    cursor.execute("""
-    SELECT * FROM tasks 
-    WHERE is_archived = 0 
-    ORDER BY 
-        CASE WHEN LOWER(TRIM(title)) = 'goal' THEN 0 
-             WHEN LOWER(TRIM(title)) = 'full day' THEN 1 
-             ELSE 2 END, 
-        sort_order ASC, id ASC
-    """)
-    tasks = [dict(r) for r in cursor.fetchall()]
+    # Fetch tasks in proper hierarchical order (parents followed by their subtasks)
+    tasks = get_all_tasks(include_archived=False)
     
     start_date = f"{year:04d}-{month:02d}-01"
     end_date = f"{year:04d}-{month:02d}-{num_days:02d}"
@@ -723,6 +779,7 @@ def get_matrix(year: int, month: int):
         t_clean = task["title"].strip().lower()
         is_goal = t_clean == "goal"
         is_full_day = t_clean == "full day"
+        is_subtask = bool(task.get("parent_id"))
         
         for idx, d_str in enumerate(day_date_strs):
             is_done = (task_id, d_str) in completed_map
@@ -734,6 +791,8 @@ def get_matrix(year: int, month: int):
             "task": task,
             "is_goal": is_goal,
             "is_full_day": is_full_day,
+            "is_subtask": is_subtask,
+            "parent_id": task.get("parent_id"),
             "cells": cells,
             "total_completed": task_total_completed
         })

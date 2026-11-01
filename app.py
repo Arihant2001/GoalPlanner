@@ -76,8 +76,9 @@ def create_task():
         return jsonify({"success": False, "error": "'Goal' is reserved as the main task and cannot be created."}), 400
         
     category = data.get("category", "Mind")
+    parent_id = data.get("parent_id")
     try:
-        task = database.add_task(title=title, category=category)
+        task = database.add_task(title=title, category=category, parent_id=parent_id)
         return jsonify({"success": True, "task": task}), 201
     except ValueError as e:
         return jsonify({"success": False, "error": str(e)}), 400
