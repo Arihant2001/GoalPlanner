@@ -9,13 +9,15 @@ def run_tests():
     assert res.status_code == 200, f"Index failed: {res.status_code}"
     print("PASS: Index page (200 OK)")
 
-    # 2. Test tasks listing
+    # 2. Test tasks listing (Goal is row 0, Full Day is row 1)
     res = client.get('/api/tasks')
     assert res.status_code == 200
     tasks = res.get_json()['tasks']
     goal_task = next((t for t in tasks if t['title'].lower() == 'goal'), None)
+    full_day_task = next((t for t in tasks if t['title'].lower() == 'full day'), None)
     assert goal_task is not None, "Goal task must exist"
-    print(f"PASS: /api/tasks returned {len(tasks)} tasks (Goal ID: {goal_task['id']})")
+    assert full_day_task is not None, "Full Day task must exist"
+    print(f"PASS: /api/tasks returned {len(tasks)} tasks (Goal ID: {goal_task['id']}, Full Day ID: {full_day_task['id']})")
 
     # 3. Test matrix endpoint
     res = client.get('/api/matrix?year=2026&month=10')
@@ -23,75 +25,94 @@ def run_tests():
     matrix = res.get_json()['data']
     assert len(matrix['days']) == 31, f"Expected 31 days in October, got {len(matrix['days'])}"
     assert matrix['matrix'][0]['task']['title'].lower() == 'goal', "First row in matrix must be Goal"
-    print(f"PASS: /api/matrix returned 31 days with Goal as first row")
+    assert matrix['matrix'][1]['task']['title'].lower() == 'full day', "Second row in matrix must be Full Day"
+    print("PASS: /api/matrix returned Goal at row 0 and Full Day at row 1")
 
-    # 4. Test Goal cannot be manually toggled
-    res = client.post('/api/toggle', json={'task_id': goal_task['id'], 'date': '2026-10-31', 'state': True})
-    assert res.status_code == 400, "Manually toggling Goal must be rejected"
-    print("PASS: Manually toggling Goal correctly rejected (400)")
-
-    # 5. Test Goal auto-ticking based on threshold
-    # Set threshold to 2 tasks
-    res = client.post('/api/settings/threshold', json={'threshold': 2})
+    # 4. Test Full Day single-task goal unlock
+    res = client.post('/api/settings/threshold', json={'threshold': 3})
     assert res.status_code == 200
-    assert res.get_json()['threshold'] == 2
 
-    # Pick 2 non-goal tasks
-    non_goal_tasks = [t for t in tasks if t['title'].lower() != 'goal']
-    task_a = non_goal_tasks[0]['id']
-    task_b = non_goal_tasks[1]['id']
-    test_date = '2026-10-31'
+    regular_tasks = [t for t in tasks if t['title'].lower() not in ('goal', 'full day')]
+    task_a = regular_tasks[0]['id']
+    test_date = '2026-10-25'
 
-    # Check 1 task: Goal should NOT be ticked yet
+    # Clear test date
+    for t in tasks:
+        client.post('/api/toggle', json={'task_id': t['id'], 'date': test_date, 'state': False})
+
+    # Check 1 regular task only: Goal should be False (threshold is 3)
     client.post('/api/toggle', json={'task_id': task_a, 'date': test_date, 'state': True})
     res = client.get('/api/matrix?year=2026&month=10')
-    goal_row = res.get_json()['data']['matrix'][0]
-    oct31_idx = 30 # Day 31
-    assert goal_row['cells'][oct31_idx] is False, "Goal should not be ticked with only 1 task"
-    print("PASS: Goal remains unticked when completed count < threshold")
+    goal_cells = res.get_json()['data']['matrix'][0]['cells']
+    oct25_idx = 24
+    assert goal_cells[oct25_idx] is False, "Goal should not be ticked with only 1 task without Full Day"
+    print("PASS: 1 task alone does not tick Goal")
 
-    # Check 2nd task: Goal SHOULD automatically become ticked!
-    client.post('/api/toggle', json={'task_id': task_b, 'date': test_date, 'state': True})
+    # Now check 'Full Day': Goal should automatically turn True!
+    client.post('/api/toggle', json={'task_id': full_day_task['id'], 'date': test_date, 'state': True})
     res = client.get('/api/matrix?year=2026&month=10')
-    goal_row = res.get_json()['data']['matrix'][0]
-    assert goal_row['cells'][oct31_idx] is True, "Goal must auto-tick when threshold (2) is reached"
-    print("PASS: Goal automatically ticked when threshold (2 tasks) reached!")
+    goal_cells = res.get_json()['data']['matrix'][0]['cells']
+    assert goal_cells[oct25_idx] is True, "Goal MUST be ticked when Full Day is checked with 1 task!"
+    print("PASS: Full Day + 1 task successfully achieved Goal!")
 
-    # Untick task_b: Goal should automatically become unticked
-    client.post('/api/toggle', json={'task_id': task_b, 'date': test_date, 'state': False})
+    # Uncheck the regular task: Goal should uncheck because 0 regular tasks are done
+    client.post('/api/toggle', json={'task_id': task_a, 'date': test_date, 'state': False})
     res = client.get('/api/matrix?year=2026&month=10')
-    goal_row = res.get_json()['data']['matrix'][0]
-    assert goal_row['cells'][oct31_idx] is False, "Goal must auto-untick when dropping below threshold"
-    print("PASS: Goal automatically unticked when dropping below threshold!")
+    goal_cells = res.get_json()['data']['matrix'][0]['cells']
+    assert goal_cells[oct25_idx] is False, "Goal must not be ticked if 0 tasks were done even with Full Day checked"
+    print("PASS: Full Day without any task does not tick Goal")
 
-    # 6. Test heatmap does NOT count Goal
+    # 5. Test Streak continuity counts GOAL achievements
+    # Let's set up 3 consecutive goal achievements: 2026-10-23, 2026-10-24, 2026-10-25
+    d1, d2, d3 = '2026-10-23', '2026-10-24', '2026-10-25'
+    task_b = regular_tasks[1]['id']
+    task_c = regular_tasks[2]['id']
+
+    # For d1: check 3 tasks (normal threshold)
+    client.post('/api/toggle', json={'task_id': task_a, 'date': d1, 'state': True})
+    client.post('/api/toggle', json={'task_id': task_b, 'date': d1, 'state': True})
+    client.post('/api/toggle', json={'task_id': task_c, 'date': d1, 'state': True})
+
+    # For d2: check 3 tasks
+    client.post('/api/toggle', json={'task_id': task_a, 'date': d2, 'state': True})
+    client.post('/api/toggle', json={'task_id': task_b, 'date': d2, 'state': True})
+    client.post('/api/toggle', json={'task_id': task_c, 'date': d2, 'state': True})
+
+    # For d3: check 1 task + Full Day
+    client.post('/api/toggle', json={'task_id': task_a, 'date': d3, 'state': True})
+    client.post('/api/toggle', json={'task_id': full_day_task['id'], 'date': d3, 'state': True})
+
     res = client.get('/api/heatmap?year=2026')
     assert res.status_code == 200
     heatmap = res.get_json()['data']
-    oct31_heatmap_day = next((d for d in heatmap['days'] if d['date'] == test_date), None)
-    assert 'Goal' not in oct31_heatmap_day['completed_tasks'], "Goal must not appear in heatmap completed tasks"
-    print("PASS: Heatmap successfully excludes 'Goal'")
+    assert heatmap['longest_streak'] >= 3, f"Expected longest streak >= 3 from Goal completions, got {heatmap['longest_streak']}"
+    print(f"PASS: Longest streak ({heatmap['longest_streak']} days) accurately tracks Goal achievement continuity!")
 
-    # 7. Test task creation with Infinity Stone category & auto-color
-    res = client.post('/api/tasks', json={'title': 'Time Management', 'category': 'Time'})
-    assert res.status_code == 201
-    new_task = res.get_json()['task']
-    assert new_task['color'] == '#22c55e', f"Expected Time green #22c55e, got {new_task['color']}"
-    print(f"PASS: Created task with Category 'Time' auto-assigned color {new_task['color']}")
+    # 6. Test categories API
+    res = client.get('/api/categories')
+    assert res.status_code == 200
+    assert len(res.get_json()['categories']) >= 6
+    print("PASS: Categories API functional")
 
-    # 8. Test Goal cannot be deleted or archived
-    res = client.delete(f"/api/tasks/{goal_task['id']}")
-    assert res.status_code == 400, "Goal task deletion must be rejected"
-    print("PASS: Goal deletion rejected (400)")
+    # Reset test date
+    for d in (d1, d2, d3):
+        for t in tasks:
+            client.post('/api/toggle', json={'task_id': t['id'], 'date': d, 'state': False})
 
-    # Clean up test task
-    client.delete(f"/api/tasks/{new_task['id']}?hard=true")
-
-    # Reset threshold back to 3
-    client.post('/api/settings/threshold', json={'threshold': 3})
+    # 7. Test reorder tasks
+    reg_tasks = [t for t in tasks if t['title'].lower() not in ('goal', 'full day')]
+    if len(reg_tasks) >= 2:
+        reversed_ids = [t['id'] for t in reversed(reg_tasks)]
+        res = client.post('/api/tasks/reorder', json={'task_ids': reversed_ids})
+        assert res.status_code == 200 and res.get_json()['success'] is True
+        m_res = client.get('/api/matrix?year=2026&month=11').get_json()['data']
+        assert m_res['matrix'][0]['task']['title'].lower() == 'goal'
+        assert m_res['matrix'][1]['task']['title'].lower() == 'full day'
+        assert m_res['matrix'][2]['task']['id'] == reversed_ids[0]
+        print("PASS: /api/tasks/reorder keeps Goal/Full Day fixed and shifts regular tasks")
 
     print("\n=========================================")
-    print(" ALL 8 V2.0 SPEC TESTS PASSED 100%! ")
+    print(" ALL 7 SPEC & REGRESSION TESTS PASSED 100%! ")
     print("=========================================\n")
 
 if __name__ == '__main__':

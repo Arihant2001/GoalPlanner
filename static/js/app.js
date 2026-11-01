@@ -1,13 +1,3 @@
-// Category to Color Mapping (6 Infinity Stone Themes)
-const CATEGORY_COLORS = {
-    "Mind": "#eab308",    // Yellow
-    "Power": "#a855f7",   // Purple
-    "Reality": "#ef4444", // Red
-    "Soul": "#f97316",    // Orange
-    "Space": "#3b82f6",   // Blue
-    "Time": "#22c55e",    // Green
-};
-
 // Global Application State
 const state = {
     currentYear: new Date().getFullYear(),
@@ -16,6 +6,7 @@ const state = {
     selectedDateStr: new Date().toISOString().split("T")[0],
     activeView: "matrix",
     tasks: [],
+    categories: [],
     goalThreshold: 3,
     streak: 0
 };
@@ -23,7 +14,9 @@ const state = {
 document.addEventListener("DOMContentLoaded", () => {
     initTheme();
     initStateFromUI();
-    loadTasks();
+    loadCategories().then(() => {
+        loadTasks();
+    });
     loadThreshold();
     switchView("matrix");
 });
@@ -38,6 +31,177 @@ function initStateFromUI() {
     if (yearSelect) yearSelect.value = state.currentYear;
     if (heatmapYearSelect) heatmapYearSelect.value = state.currentYear;
     if (yearlySelect) yearlySelect.value = state.currentYear;
+}
+
+// ----------------- Categories Management ----------------- //
+
+async function loadCategories() {
+    try {
+        const res = await fetch("/api/categories");
+        const json = await res.json();
+        if (json.success) {
+            state.categories = json.categories;
+            populateCategoryDropdowns();
+            renderCategoriesManagerList();
+        }
+    } catch (err) {
+        console.error("Failed to load categories", err);
+    }
+}
+
+function getCategoryColor(categoryName) {
+    const found = state.categories.find(c => c.name.toLowerCase() === categoryName.toLowerCase());
+    return found ? found.color : "#3b82f6";
+}
+
+function populateCategoryDropdowns(preserveValue = null) {
+    const taskCatSelect = document.getElementById("task-category-select");
+    if (!taskCatSelect) return;
+
+    const currentVal = preserveValue !== null ? preserveValue : taskCatSelect.value;
+    taskCatSelect.innerHTML = "";
+
+    state.categories.forEach(cat => {
+        const opt = document.createElement("option");
+        opt.value = cat.name;
+        opt.textContent = `${cat.name}`;
+        opt.dataset.color = cat.color;
+        taskCatSelect.appendChild(opt);
+    });
+
+    if (currentVal && state.categories.some(c => c.name.toLowerCase() === currentVal.toLowerCase())) {
+        const matched = state.categories.find(c => c.name.toLowerCase() === currentVal.toLowerCase());
+        taskCatSelect.value = matched.name;
+    } else if (state.categories.length > 0) {
+        taskCatSelect.value = state.categories[0].name;
+    }
+
+    onCategorySelectChange(taskCatSelect.value);
+}
+
+function renderCategoriesManagerList() {
+    const container = document.getElementById("categories-list-container");
+    if (!container) return;
+
+    container.innerHTML = "";
+    if (state.categories.length === 0) {
+        container.innerHTML = `<div class="text-center py-4 text-xs text-slate-500">No categories found. Add one above!</div>`;
+        return;
+    }
+
+    state.categories.forEach(cat => {
+        const row = document.createElement("div");
+        row.className = "flex items-center justify-between p-2.5 rounded-xl bg-slate-950/60 border border-slate-800 gap-2";
+        row.innerHTML = `
+            <div class="flex items-center gap-2.5 flex-1">
+                <input type="color" value="${cat.color}" onchange="handleUpdateCategoryColor(${cat.id}, '${cat.name.replace(/'/g, "\\'")}', this.value)" class="w-7 h-7 rounded cursor-pointer bg-transparent border-0 p-0" title="Change color">
+                <input type="text" value="${cat.name}" onblur="handleUpdateCategoryName(${cat.id}, this.value, '${cat.color}')" class="bg-transparent text-xs font-semibold text-white px-2 py-1 rounded focus:bg-slate-900 border border-transparent focus:border-slate-700 flex-1">
+            </div>
+            <button onclick="handleDeleteCategory(${cat.id}, '${cat.name.replace(/'/g, "\\'")}')" class="p-1.5 text-slate-400 hover:text-red-400 rounded-lg hover:bg-slate-900 transition-colors" title="Delete Category">
+                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+            </button>
+        `;
+        container.appendChild(row);
+    });
+    lucide.createIcons();
+}
+
+function openCategoriesModal() {
+    document.getElementById("categories-modal").classList.remove("hidden");
+    renderCategoriesManagerList();
+    lucide.createIcons();
+}
+
+function closeCategoriesModal() {
+    document.getElementById("categories-modal").classList.add("hidden");
+    const currentSelectedCat = document.getElementById("task-category-select") ? document.getElementById("task-category-select").value : null;
+    populateCategoryDropdowns(currentSelectedCat);
+    loadTasks();
+    if (window.loadMatrix) window.loadMatrix();
+}
+
+async function handleAddCategory() {
+    const nameInput = document.getElementById("new-cat-name");
+    const colorInput = document.getElementById("new-cat-color");
+    const name = nameInput.value.trim();
+    const color = colorInput.value;
+
+    if (!name) {
+        showToast("Category name is required", "error");
+        return;
+    }
+
+    try {
+        const res = await fetch("/api/categories", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name, color })
+        });
+        const json = await res.json();
+        if (json.success) {
+            nameInput.value = "";
+            showToast(`Category '${name}' added!`, "success");
+            await loadCategories();
+        } else {
+            showToast(json.error || "Failed to add category", "error");
+        }
+    } catch (err) {
+        showToast("Network error creating category", "error");
+    }
+}
+
+async function handleUpdateCategoryColor(id, name, color) {
+    try {
+        const res = await fetch(`/api/categories/${id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name, color })
+        });
+        const json = await res.json();
+        if (json.success) {
+            await loadCategories();
+            showToast("Category color updated!", "success");
+        }
+    } catch (err) {
+        showToast("Failed to update color", "error");
+    }
+}
+
+async function handleUpdateCategoryName(id, newName, color) {
+    const trimmed = newName.trim();
+    if (!trimmed) return;
+
+    try {
+        const res = await fetch(`/api/categories/${id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: trimmed, color })
+        });
+        const json = await res.json();
+        if (json.success) {
+            await loadCategories();
+            showToast("Category name updated!", "success");
+        }
+    } catch (err) {
+        showToast("Failed to update category name", "error");
+    }
+}
+
+async function handleDeleteCategory(id, name) {
+    if (!confirm(`Are you sure you want to delete category '${name}'?`)) return;
+
+    try {
+        const res = await fetch(`/api/categories/${id}`, { method: "DELETE" });
+        const json = await res.json();
+        if (json.success) {
+            showToast("Category deleted", "info");
+            await loadCategories();
+        } else {
+            showToast(json.error || "Cannot delete category", "error");
+        }
+    } catch (err) {
+        showToast("Error deleting category", "error");
+    }
 }
 
 // ----------------- Goal Threshold Management ----------------- //
@@ -86,7 +250,6 @@ async function updateGoalThreshold(newThreshold) {
 function switchView(viewName) {
     state.activeView = viewName;
 
-    // Update Tab Styles
     document.querySelectorAll(".view-tab").forEach(tab => {
         tab.classList.remove("text-white", "bg-blue-600", "shadow-sm");
         tab.classList.add("text-slate-400");
@@ -98,13 +261,11 @@ function switchView(viewName) {
         activeTab.classList.add("text-white", "bg-blue-600", "shadow-sm");
     }
 
-    // Toggle Section Visibility
     document.getElementById("view-matrix").classList.toggle("hidden", viewName !== "matrix");
     document.getElementById("view-heatmap").classList.toggle("hidden", viewName !== "heatmap");
     document.getElementById("view-today").classList.toggle("hidden", viewName !== "today");
     document.getElementById("view-yearly").classList.toggle("hidden", viewName !== "yearly");
 
-    // Load data for active view
     if (viewName === "matrix") {
         if (window.loadMatrix) window.loadMatrix();
     } else if (viewName === "heatmap") {
@@ -174,10 +335,10 @@ function populateHeatmapTaskFilter() {
     if (!select) return;
 
     const currentVal = select.value;
-    select.innerHTML = '<option value="all">⚡ All Habits (Aggregate - Goal Excluded)</option>';
+    select.innerHTML = '<option value="all">⚡ All Habits (Aggregate)</option>';
     state.tasks.forEach(task => {
-        // Exclude Goal from habit filter list
-        if (task.title.trim().toLowerCase() === "goal") return;
+        const tTitle = task.title.trim().toLowerCase();
+        if (tTitle === "goal" || tTitle === "full day") return;
         const opt = document.createElement("option");
         opt.value = task.id;
         opt.textContent = `${task.title} (${task.category})`;
@@ -187,11 +348,9 @@ function populateHeatmapTaskFilter() {
 }
 
 function onCategorySelectChange(category) {
-    const color = CATEGORY_COLORS[category] || "#eab308";
+    const color = getCategoryColor(category);
     const dot = document.getElementById("category-preview-dot");
-    const title = document.getElementById("category-preview-title");
     if (dot) dot.style.backgroundColor = color;
-    if (title) title.textContent = `${category} Stone Badge (${color})`;
 }
 
 function openAddTaskModal() {
@@ -199,18 +358,17 @@ function openAddTaskModal() {
     document.getElementById("task-id-input").value = "";
     document.getElementById("task-title-input").value = "";
     document.getElementById("task-title-input").disabled = false;
-    document.getElementById("task-category-select").value = "Mind";
     document.getElementById("task-delete-btn").classList.add("hidden");
-    onCategorySelectChange("Mind");
 
+    populateCategoryDropdowns();
     document.getElementById("task-modal").classList.remove("hidden");
     lucide.createIcons();
 }
 
 function openEditTaskModal(task) {
-    const isGoal = task.title.trim().toLowerCase() === "goal";
-    if (isGoal) {
-        showToast("The 'Goal' main task cannot be edited or deleted.", "info");
+    const tClean = task.title.trim().toLowerCase();
+    if (tClean === "goal" || tClean === "full day") {
+        showToast(`The '${task.title}' task is a system task and cannot be edited.`, "info");
         return;
     }
 
@@ -218,9 +376,14 @@ function openEditTaskModal(task) {
     document.getElementById("task-id-input").value = task.id;
     document.getElementById("task-title-input").value = task.title;
     document.getElementById("task-title-input").disabled = false;
-    document.getElementById("task-category-select").value = task.category || "Mind";
     document.getElementById("task-delete-btn").classList.remove("hidden");
-    onCategorySelectChange(task.category || "Mind");
+
+    populateCategoryDropdowns();
+    const catSelect = document.getElementById("task-category-select");
+    if (catSelect && task.category) {
+        catSelect.value = task.category;
+    }
+    onCategorySelectChange(catSelect ? catSelect.value : "");
 
     document.getElementById("task-modal").classList.remove("hidden");
     lucide.createIcons();
@@ -331,25 +494,26 @@ async function loadTodayChecklist() {
         const dayIdx = d.getDate() - 1;
         const threshold = matrixData.goal_threshold || 3;
 
-        // Count completed non-goal tasks
-        let nonGoalCompleted = 0;
-        let nonGoalTotal = 0;
+        let regularCompleted = 0;
+        let regularTotal = 0;
         let goalIsCompleted = false;
+        let fullDayIsCompleted = false;
 
         matrixData.matrix.forEach(row => {
-            const isGoal = row.is_goal || row.task.title.trim().toLowerCase() === "goal";
-            const isDone = row.cells[dayIdx] || false;
-            if (isGoal) {
+            const tTitle = row.task.title.trim().toLowerCase();
+            const isDone = Boolean(row.cells[dayIdx]);
+            if (tTitle === "goal") {
                 goalIsCompleted = isDone;
+            } else if (tTitle === "full day") {
+                fullDayIsCompleted = isDone;
             } else {
-                nonGoalTotal++;
-                if (isDone) nonGoalCompleted++;
+                regularTotal++;
+                if (isDone) regularCompleted++;
             }
         });
 
-        // Update progress ring
-        const pct = nonGoalTotal > 0 ? Math.round((nonGoalCompleted / nonGoalTotal) * 100) : 0;
-        updateProgressRing(nonGoalCompleted, nonGoalTotal, pct);
+        const pct = regularTotal > 0 ? Math.round((regularCompleted / regularTotal) * 100) : 0;
+        updateProgressRing(regularCompleted, regularTotal, pct);
 
         container.innerHTML = "";
 
@@ -360,6 +524,13 @@ async function loadTodayChecklist() {
             ? "bg-amber-500/10 border-amber-500/40 shadow-lg shadow-amber-500/10" 
             : "bg-slate-900/60 border-slate-800"
         }`;
+        
+        const goalStatusSubtext = goalIsCompleted 
+            ? (fullDayIsCompleted ? '🎉 Goal achieved via Full Day focus!' : '🎉 Target reached! Main goal achieved.')
+            : (fullDayIsCompleted 
+                ? 'Check 1 task to complete your Full Day goal.' 
+                : `Complete any ${threshold} tasks (or check Full Day with 1 task) to achieve.`);
+
         goalCard.innerHTML = `
             <div class="flex items-center justify-between">
                 <div class="flex items-center gap-3">
@@ -370,11 +541,11 @@ async function loadTodayChecklist() {
                         <div class="font-bold text-sm text-white flex items-center gap-1.5">
                             Daily Goal
                             <span class="text-[10px] px-1.5 py-0.5 rounded-full ${goalIsCompleted ? 'bg-amber-400 text-slate-950 font-bold' : 'bg-slate-800 text-slate-400'}">
-                                ${goalIsCompleted ? 'ACHIEVED' : `${nonGoalCompleted}/${threshold} to unlock`}
+                                ${goalIsCompleted ? 'ACHIEVED' : `${regularCompleted}/${threshold} tasks`}
                             </span>
                         </div>
                         <div class="text-[11px] text-slate-400">
-                            ${goalIsCompleted ? '🎉 Target reached! Main goal unlocked.' : `Complete any ${threshold} tasks today to automatically achieve.`}
+                            ${goalStatusSubtext}
                         </div>
                     </div>
                 </div>
@@ -383,7 +554,6 @@ async function loadTodayChecklist() {
         `;
         container.appendChild(goalCard);
 
-        // Render remaining tasks
         matrixData.matrix.forEach(row => {
             const task = row.task;
             if (row.is_goal || task.title.trim().toLowerCase() === "goal") return;
@@ -550,6 +720,7 @@ async function handleBackupImport() {
         if (data.success) {
             showToast("Backup restored successfully!", "success");
             closeBackupModal();
+            await loadCategories();
             loadTasks();
             loadThreshold();
             if (window.loadMatrix) window.loadMatrix();

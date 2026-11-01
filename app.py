@@ -16,6 +16,48 @@ def index():
     now = datetime.now()
     return render_template("index.html", initial_year=now.year, initial_month=now.month)
 
+# ----------------- Categories Endpoints ----------------- #
+
+@app.route("/api/categories", methods=["GET"])
+def list_categories():
+    categories = database.get_all_categories()
+    return jsonify({"success": True, "categories": categories})
+
+@app.route("/api/categories", methods=["POST"])
+def create_category():
+    data = request.get_json() or {}
+    name = data.get("name", "").strip()
+    color = data.get("color", "").strip()
+    if not name:
+        return jsonify({"success": False, "error": "Category name is required"}), 400
+    if not color:
+        return jsonify({"success": False, "error": "Category color is required"}), 400
+        
+    try:
+        cat = database.add_category(name=name, color=color)
+        return jsonify({"success": True, "category": cat}), 201
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+@app.route("/api/categories/<int:cat_id>", methods=["PUT"])
+def update_category_endpoint(cat_id):
+    data = request.get_json() or {}
+    name = data.get("name")
+    color = data.get("color")
+    try:
+        updated = database.update_category(cat_id=cat_id, name=name, color=color)
+        return jsonify({"success": True, "category": updated})
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+@app.route("/api/categories/<int:cat_id>", methods=["DELETE"])
+def delete_category_endpoint(cat_id):
+    try:
+        database.delete_category(cat_id=cat_id)
+        return jsonify({"success": True, "message": "Category removed"})
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
 # ----------------- Tasks Endpoints ----------------- #
 
 @app.route("/api/tasks", methods=["GET"])
@@ -166,6 +208,12 @@ def export_data():
     output = io.StringIO()
     writer = csv.writer(output)
     
+    writer.writerow(["=== CATEGORIES ==="])
+    writer.writerow(["ID", "Name", "Color", "Sort Order"])
+    for c in data.get("categories", []):
+        writer.writerow([c["id"], c["name"], c["color"], c.get("sort_order", 0)])
+        
+    writer.writerow([])
     writer.writerow(["=== TASKS ==="])
     writer.writerow(["ID", "Title", "Category", "Color", "Icon", "Target Frequency", "Sort Order", "Is Archived"])
     for t in data["tasks"]:

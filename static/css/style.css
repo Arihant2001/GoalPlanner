@@ -91,6 +91,30 @@ html:not(.dark) .border-slate-700 {
     border-color: #cbd5e1 !important;
 }
 
+/* Drag and drop row styling */
+.drag-handle {
+    cursor: grab;
+}
+.drag-handle:active {
+    cursor: grabbing;
+}
+tr.dragging-row {
+    opacity: 0.35;
+    background-color: rgba(59, 130, 246, 0.15) !important;
+}
+tr.drag-over-top td {
+    box-shadow: inset 0 2px 0 0 #3b82f6 !important;
+    background-color: rgba(59, 130, 246, 0.08) !important;
+}
+tr.drag-over-bottom td {
+    box-shadow: inset 0 -2px 0 0 #3b82f6 !important;
+    background-color: rgba(59, 130, 246, 0.08) !important;
+}
+tr.drag-over-row td {
+    box-shadow: inset 0 2px 0 0 #3b82f6 !important;
+    background-color: rgba(59, 130, 246, 0.08) !important;
+}
+
 /* Modern Checkbox styling */
 .matrix-checkbox {
     appearance: none;
