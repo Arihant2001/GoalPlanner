@@ -16,19 +16,6 @@ DEFAULT_CATEGORIES = [
     {"name": "Time", "color": "#22c55e"}
 ]
 
-DEFAULT_TASKS = [
-    {"title": "Goal", "category": "Mind", "color": "#eab308", "icon": "flag", "sort_order": 0},
-    {"title": "Full Day", "category": "Mind", "color": "#f59e0b", "icon": "sun", "sort_order": 1},
-    {"title": "Office", "category": "Space", "color": "#3b82f6", "icon": "briefcase", "sort_order": 2},
-    {"title": "DSA", "category": "Time", "color": "#22c55e", "icon": "code-2", "sort_order": 3},
-    {"title": "System Design", "category": "Power", "color": "#a855f7", "icon": "network", "sort_order": 4},
-    {"title": "Development", "category": "Space", "color": "#3b82f6", "icon": "laptop", "sort_order": 5},
-    {"title": "Content", "category": "Soul", "color": "#f97316", "icon": "video", "sort_order": 6},
-    {"title": "Expenses", "category": "Mind", "color": "#eab308", "icon": "wallet", "sort_order": 7},
-    {"title": "Exercise", "category": "Reality", "color": "#ef4444", "icon": "dumbbell", "sort_order": 8},
-    {"title": "Cleaning", "category": "Time", "color": "#22c55e", "icon": "sparkles", "sort_order": 9},
-]
-
 def get_connection():
     os.makedirs(DB_DIR, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
@@ -40,29 +27,34 @@ def init_db():
     conn = get_connection()
     cursor = conn.cursor()
     
-    # Categories table
+    # 1. Users table
     cursor.execute("""
-    CREATE TABLE IF NOT EXISTS categories (
+    CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT UNIQUE NOT NULL,
-        color TEXT NOT NULL,
-        sort_order INTEGER DEFAULT 0,
+        username TEXT UNIQUE NOT NULL COLLATE NOCASE,
+        password_hash TEXT NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """)
     
-    # Seed default categories if empty
-    cursor.execute("SELECT COUNT(*) AS cnt FROM categories")
-    if cursor.fetchone()["cnt"] == 0:
-        for idx, cat in enumerate(DEFAULT_CATEGORIES):
-            cursor.execute("""
-            INSERT OR IGNORE INTO categories (name, color, sort_order)
-            VALUES (?, ?, ?)
-            """, (cat["name"], cat["color"], idx))
+    # 2. Categories table
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS categories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER DEFAULT NULL,
+        name TEXT NOT NULL,
+        color TEXT NOT NULL,
+        sort_order INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+    """)
     
+    # 3. Tasks table
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS tasks (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER DEFAULT NULL,
         title TEXT NOT NULL,
         category TEXT DEFAULT 'Mind',
         color TEXT DEFAULT '#eab308',
@@ -72,108 +64,247 @@ def init_db():
         is_archived INTEGER DEFAULT 0,
         parent_id INTEGER DEFAULT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (parent_id) REFERENCES tasks(id) ON DELETE CASCADE
+        FOREIGN KEY (parent_id) REFERENCES tasks(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )
     """)
     
-    # Auto-migration: ensure parent_id exists in existing tasks table
-    cursor.execute("PRAGMA table_info(tasks)")
-    cols = [r["name"] for r in cursor.fetchall()]
-    if "parent_id" not in cols:
-        cursor.execute("ALTER TABLE tasks ADD COLUMN parent_id INTEGER DEFAULT NULL REFERENCES tasks(id) ON DELETE CASCADE")
-        
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasks_parent_id ON tasks(parent_id)")
-    
+    # 4. Completions table
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS completions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER DEFAULT NULL,
         task_id INTEGER NOT NULL,
         date TEXT NOT NULL,
         completed INTEGER NOT NULL DEFAULT 1,
         notes TEXT DEFAULT '',
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
         UNIQUE(task_id, date)
     )
     """)
     
-    cursor.execute("""
-    CREATE INDEX IF NOT EXISTS idx_completions_date ON completions(date);
-    """)
-    cursor.execute("""
-    CREATE INDEX IF NOT EXISTS idx_completions_task_date ON completions(task_id, date);
-    """)
-    
+    # 5. Settings table
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS settings (
-        key TEXT PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER DEFAULT NULL,
+        key TEXT NOT NULL,
         value TEXT NOT NULL,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )
     """)
     
-    cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('goal_threshold', '3')")
-    
+    # 6. Daily summaries table
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS daily_summaries (
-        date TEXT PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER DEFAULT NULL,
+        date TEXT NOT NULL,
         daily_goal_achieved INTEGER DEFAULT 0,
         focus_note TEXT DEFAULT '',
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )
     """)
     
-    # 1. Ensure 'Goal' task exists at sort_order 0
-    cursor.execute("SELECT id FROM tasks WHERE LOWER(TRIM(title)) = 'goal'")
-    goal_row = cursor.fetchone()
-    if not goal_row:
+    # Migrations: Ensure user_id exists on all tables
+    for tbl in ("categories", "tasks", "completions", "settings", "daily_summaries"):
+        cursor.execute(f"PRAGMA table_info({tbl})")
+        cols = [r["name"] for r in cursor.fetchall()]
+        if "user_id" not in cols:
+            cursor.execute(f"ALTER TABLE {tbl} ADD COLUMN user_id INTEGER DEFAULT NULL REFERENCES users(id) ON DELETE CASCADE")
+            
+    cursor.execute("PRAGMA table_info(tasks)")
+    t_cols = [r["name"] for r in cursor.fetchall()]
+    if "parent_id" not in t_cols:
+        cursor.execute("ALTER TABLE tasks ADD COLUMN parent_id INTEGER DEFAULT NULL REFERENCES tasks(id) ON DELETE CASCADE")
+
+    # Multi-tenant constraint migration: ensure categories has UNIQUE(user_id, name)
+    cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='categories'")
+    cat_sql = cursor.fetchone()["sql"]
+    if "UNIQUE(user_id, name)" not in cat_sql and "UNIQUE (user_id, name)" not in cat_sql:
         cursor.execute("""
-        INSERT INTO tasks (title, category, color, icon, target_frequency, sort_order)
-        VALUES ('Goal', 'Mind', '#eab308', 'flag', 'daily', 0)
+        CREATE TABLE categories_v2 (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER DEFAULT NULL,
+            name TEXT NOT NULL,
+            color TEXT NOT NULL,
+            sort_order INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            UNIQUE(user_id, name)
+        )
         """)
-        
-    # 2. Ensure 'Full Day' task exists at sort_order 1
-    cursor.execute("SELECT id FROM tasks WHERE LOWER(TRIM(title)) = 'full day'")
-    full_day_row = cursor.fetchone()
-    if not full_day_row:
+        cursor.execute("INSERT OR IGNORE INTO categories_v2 (id, user_id, name, color, sort_order, created_at) SELECT id, user_id, name, color, sort_order, created_at FROM categories")
+        cursor.execute("DROP TABLE categories")
+        cursor.execute("ALTER TABLE categories_v2 RENAME TO categories")
+
+    # Multi-tenant constraint migration: ensure settings has UNIQUE(user_id, key)
+    cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='settings'")
+    set_sql = cursor.fetchone()["sql"]
+    if "UNIQUE(user_id, key)" not in set_sql and "UNIQUE (user_id, key)" not in set_sql:
         cursor.execute("""
-        INSERT INTO tasks (title, category, color, icon, target_frequency, sort_order)
-        VALUES ('Full Day', 'Mind', '#f59e0b', 'sun', 'daily', 1)
+        CREATE TABLE settings_v2 (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER DEFAULT NULL,
+            key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            UNIQUE(user_id, key)
+        )
         """)
-    else:
-        # ensure unarchived
-        cursor.execute("UPDATE tasks SET is_archived = 0, sort_order = 1 WHERE id = ?", (full_day_row["id"],))
+        cursor.execute("INSERT OR IGNORE INTO settings_v2 (user_id, key, value, updated_at) SELECT user_id, key, value, updated_at FROM settings")
+        cursor.execute("DROP TABLE settings")
+        cursor.execute("ALTER TABLE settings_v2 RENAME TO settings")
+
+    # Multi-tenant constraint migration: ensure daily_summaries has UNIQUE(user_id, date)
+    cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='daily_summaries'")
+    ds_sql = cursor.fetchone()["sql"]
+    if "UNIQUE(user_id, date)" not in ds_sql and "UNIQUE (user_id, date)" not in ds_sql:
+        cursor.execute("""
+        CREATE TABLE daily_summaries_v2 (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER DEFAULT NULL,
+            date TEXT NOT NULL,
+            daily_goal_achieved INTEGER DEFAULT 0,
+            focus_note TEXT DEFAULT '',
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            UNIQUE(user_id, date)
+        )
+        """)
+        cursor.execute("INSERT OR IGNORE INTO daily_summaries_v2 (user_id, date, daily_goal_achieved, focus_note, updated_at) SELECT user_id, date, daily_goal_achieved, focus_note, updated_at FROM daily_summaries")
+        cursor.execute("DROP TABLE daily_summaries")
+        cursor.execute("ALTER TABLE daily_summaries_v2 RENAME TO daily_summaries")
         
-    # Check if other default tasks need seeding
-    cursor.execute("SELECT COUNT(*) AS cnt FROM tasks WHERE is_archived = 0")
-    count = cursor.fetchone()["cnt"]
-    if count <= 2:
-        for t in DEFAULT_TASKS:
-            if t["title"].lower() in ("goal", "full day"):
-                continue
-            cursor.execute("""
-            INSERT INTO tasks (title, category, color, icon, target_frequency, sort_order)
-            VALUES (?, ?, ?, ?, 'daily', ?)
-            """, (t["title"], t["category"], t["color"], t["icon"], t["sort_order"]))
+    # Create indexes for fast sub-millisecond lookups
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasks_parent_id ON tasks(parent_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_completions_user_date ON completions(user_id, date)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_completions_task_date ON completions(task_id, date)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_categories_user_id ON categories(user_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_settings_user_key ON settings(user_id, key)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_daily_summaries_user_date ON daily_summaries(user_id, date)")
+
+    # Ensure Goal task icon is set to 'target'
+    cursor.execute("UPDATE tasks SET icon = 'target' WHERE LOWER(TRIM(title)) = 'goal'")
     
     conn.commit()
     conn.close()
 
-# ----------------- Categories CRUD ----------------- #
+# ----------------- User Management & Authentication ----------------- #
 
-def get_all_categories():
+def create_user(username, password_hash):
+    username = username.strip()
+    if len(username) < 3:
+        raise ValueError("Username must be at least 3 characters long.")
+        
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM categories ORDER BY sort_order ASC, id ASC")
+    
+    cursor.execute("SELECT id FROM users WHERE LOWER(username) = LOWER(?)", (username,))
+    if cursor.fetchone():
+        conn.close()
+        raise ValueError(f"Username '{username}' is already taken. Please choose another.")
+        
+    cursor.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)", (username, password_hash))
+    user_id = cursor.lastrowid
+    conn.commit()
+    
+    # If this is the very first registered user, claim any legacy data from single-user mode
+    cursor.execute("SELECT COUNT(*) AS cnt FROM users")
+    if cursor.fetchone()["cnt"] == 1:
+        cursor.execute("UPDATE tasks SET user_id = ? WHERE user_id IS NULL", (user_id,))
+        cursor.execute("UPDATE completions SET user_id = ? WHERE user_id IS NULL", (user_id,))
+        cursor.execute("UPDATE categories SET user_id = ? WHERE user_id IS NULL", (user_id,))
+        cursor.execute("UPDATE settings SET user_id = ? WHERE user_id IS NULL", (user_id,))
+        cursor.execute("UPDATE daily_summaries SET user_id = ? WHERE user_id IS NULL", (user_id,))
+        conn.commit()
+        
+    # Ensure this user has their initial Goal & Full Day tasks, categories, and settings
+    seed_user_defaults(user_id, conn=conn)
+    
+    cursor.execute("SELECT id, username, created_at FROM users WHERE id = ?", (user_id,))
+    user = dict(cursor.fetchone())
+    conn.close()
+    return user
+
+def get_user_by_username(username):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM users WHERE LOWER(username) = LOWER(?)", (username.strip(),))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+def get_user_by_id(user_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, username, created_at FROM users WHERE id = ?", (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+def seed_user_defaults(user_id, conn=None):
+    should_close = False
+    if conn is None:
+        conn = get_connection()
+        should_close = True
+    cursor = conn.cursor()
+    
+    # 1. Preset Categories for this user
+    cursor.execute("SELECT COUNT(*) AS cnt FROM categories WHERE user_id = ?", (user_id,))
+    if cursor.fetchone()["cnt"] == 0:
+        for idx, cat in enumerate(DEFAULT_CATEGORIES):
+            cursor.execute("""
+            INSERT INTO categories (user_id, name, color, sort_order)
+            VALUES (?, ?, ?, ?)
+            """, (user_id, cat["name"], cat["color"], idx))
+            
+    # 2. Goal task (Row 0)
+    cursor.execute("SELECT id FROM tasks WHERE user_id = ? AND LOWER(TRIM(title)) = 'goal'", (user_id,))
+    if not cursor.fetchone():
+        cursor.execute("""
+        INSERT INTO tasks (user_id, title, category, color, icon, target_frequency, sort_order)
+        VALUES (?, 'Goal', 'Mind', '#eab308', 'target', 'daily', 0)
+        """, (user_id,))
+        
+    # 3. Full Day task (Row 1)
+    cursor.execute("SELECT id FROM tasks WHERE user_id = ? AND LOWER(TRIM(title)) = 'full day'", (user_id,))
+    if not cursor.fetchone():
+        cursor.execute("""
+        INSERT INTO tasks (user_id, title, category, color, icon, target_frequency, sort_order)
+        VALUES (?, 'Full Day', 'Mind', '#f59e0b', 'sun', 'daily', 1)
+        """, (user_id,))
+        
+    # 4. Default Goal Threshold Setting = 3
+    cursor.execute("SELECT value FROM settings WHERE user_id = ? AND key = 'goal_threshold'", (user_id,))
+    if not cursor.fetchone():
+        cursor.execute("INSERT INTO settings (user_id, key, value) VALUES (?, 'goal_threshold', '3')", (user_id,))
+        
+    conn.commit()
+    if should_close:
+        conn.close()
+
+# ----------------- Categories CRUD ----------------- #
+
+def get_all_categories(user_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM categories WHERE user_id = ? ORDER BY sort_order ASC, id ASC", (user_id,))
     cats = [dict(r) for r in cursor.fetchall()]
     conn.close()
     return cats
 
-def get_category_color_map():
-    cats = get_all_categories()
+def get_category_color_map(user_id):
+    cats = get_all_categories(user_id)
     return {c["name"]: c["color"] for c in cats}
 
-def add_category(name, color):
+def add_category(user_id, name, color):
     name = name.strip()
     color = color.strip()
     if not name:
@@ -184,31 +315,31 @@ def add_category(name, color):
     conn = get_connection()
     cursor = conn.cursor()
     
-    cursor.execute("SELECT id FROM categories WHERE LOWER(TRIM(name)) = LOWER(?)", (name,))
+    cursor.execute("SELECT id FROM categories WHERE user_id = ? AND LOWER(TRIM(name)) = LOWER(?)", (user_id, name))
     if cursor.fetchone():
         conn.close()
         raise ValueError(f"Category '{name}' already exists.")
         
-    cursor.execute("SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_order FROM categories")
+    cursor.execute("SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_order FROM categories WHERE user_id = ?", (user_id,))
     next_order = cursor.fetchone()["next_order"]
     
     cursor.execute("""
-    INSERT INTO categories (name, color, sort_order)
-    VALUES (?, ?, ?)
-    """, (name, color, next_order))
+    INSERT INTO categories (user_id, name, color, sort_order)
+    VALUES (?, ?, ?, ?)
+    """, (user_id, name, color, next_order))
     cat_id = cursor.lastrowid
     conn.commit()
     
-    cursor.execute("SELECT * FROM categories WHERE id = ?", (cat_id,))
+    cursor.execute("SELECT * FROM categories WHERE id = ? AND user_id = ?", (cat_id, user_id))
     cat = dict(cursor.fetchone())
     conn.close()
     return cat
 
-def update_category(cat_id, name=None, color=None):
+def update_category(user_id, cat_id, name=None, color=None):
     conn = get_connection()
     cursor = conn.cursor()
     
-    cursor.execute("SELECT * FROM categories WHERE id = ?", (cat_id,))
+    cursor.execute("SELECT * FROM categories WHERE id = ? AND user_id = ?", (cat_id, user_id))
     existing = cursor.fetchone()
     if not existing:
         conn.close()
@@ -222,104 +353,101 @@ def update_category(cat_id, name=None, color=None):
         conn.close()
         raise ValueError("Category name cannot be empty.")
         
-    cursor.execute("SELECT id FROM categories WHERE LOWER(TRIM(name)) = LOWER(?) AND id != ?", (new_name, cat_id))
+    cursor.execute("SELECT id FROM categories WHERE user_id = ? AND LOWER(TRIM(name)) = LOWER(?) AND id != ?", (user_id, new_name, cat_id))
     if cursor.fetchone():
         conn.close()
         raise ValueError(f"Category name '{new_name}' is already used.")
         
-    cursor.execute("UPDATE categories SET name = ?, color = ? WHERE id = ?", (new_name, new_color, cat_id))
+    cursor.execute("UPDATE categories SET name = ?, color = ? WHERE id = ? AND user_id = ?", (new_name, new_color, cat_id, user_id))
     
     cursor.execute("""
     UPDATE tasks 
     SET category = ?, color = ? 
-    WHERE category = ?
-    """, (new_name, new_color, old_name))
+    WHERE category = ? AND user_id = ?
+    """, (new_name, new_color, old_name, user_id))
     
     conn.commit()
-    cursor.execute("SELECT * FROM categories WHERE id = ?", (cat_id,))
+    cursor.execute("SELECT * FROM categories WHERE id = ? AND user_id = ?", (cat_id, user_id))
     updated = dict(cursor.fetchone())
     conn.close()
     return updated
 
-def delete_category(cat_id):
+def delete_category(user_id, cat_id):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT name FROM categories WHERE id = ?", (cat_id,))
+    cursor.execute("SELECT name FROM categories WHERE id = ? AND user_id = ?", (cat_id, user_id))
     cat = cursor.fetchone()
     if not cat:
         conn.close()
         raise ValueError("Category not found.")
         
-    cursor.execute("SELECT COUNT(*) AS cnt FROM categories")
+    cursor.execute("SELECT COUNT(*) AS cnt FROM categories WHERE user_id = ?", (user_id,))
     if cursor.fetchone()["cnt"] <= 1:
         conn.close()
         raise ValueError("Cannot delete the only remaining category.")
         
-    cursor.execute("DELETE FROM categories WHERE id = ?", (cat_id,))
+    cursor.execute("DELETE FROM categories WHERE id = ? AND user_id = ?", (cat_id, user_id))
     conn.commit()
     conn.close()
     return True
 
 # ----------------- Settings API ----------------- #
 
-def get_setting(key, default="3"):
+def get_setting(user_id, key, default="3"):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT value FROM settings WHERE key = ?", (key,))
+    cursor.execute("SELECT value FROM settings WHERE user_id = ? AND key = ?", (user_id, key))
     row = cursor.fetchone()
     conn.close()
     return row["value"] if row else default
 
-def set_setting(key, value):
+def set_setting(user_id, key, value):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("""
-    INSERT INTO settings (key, value, updated_at)
-    VALUES (?, ?, CURRENT_TIMESTAMP)
-    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
-    """, (key, str(value)))
+    
+    cursor.execute("SELECT rowid AS rid FROM settings WHERE user_id = ? AND key = ?", (user_id, key))
+    row = cursor.fetchone()
+    if row:
+        cursor.execute("UPDATE settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE rowid = ?", (str(value), row["rid"]))
+    else:
+        cursor.execute("INSERT INTO settings (user_id, key, value) VALUES (?, ?, ?)", (user_id, key, str(value)))
+        
     conn.commit()
     conn.close()
     
     if key == "goal_threshold":
-        recalculate_all_goals(int(value))
+        recalculate_all_goals(user_id, int(value))
     return value
 
-def get_goal_threshold():
+def get_goal_threshold(user_id):
     try:
-        return int(get_setting("goal_threshold", "3"))
+        return int(get_setting(user_id, "goal_threshold", "3"))
     except ValueError:
         return 3
 
 # ----------------- Auto Goal Logic ----------------- #
 
-def get_special_task_ids(cursor):
-    cursor.execute("SELECT id FROM tasks WHERE LOWER(TRIM(title)) = 'goal' AND is_archived = 0 LIMIT 1")
+def get_special_task_ids(user_id, cursor):
+    cursor.execute("SELECT id FROM tasks WHERE user_id = ? AND LOWER(TRIM(title)) = 'goal' AND is_archived = 0 LIMIT 1", (user_id,))
     goal_row = cursor.fetchone()
     goal_id = goal_row["id"] if goal_row else None
     
-    cursor.execute("SELECT id FROM tasks WHERE LOWER(TRIM(title)) = 'full day' AND is_archived = 0 LIMIT 1")
+    cursor.execute("SELECT id FROM tasks WHERE user_id = ? AND LOWER(TRIM(title)) = 'full day' AND is_archived = 0 LIMIT 1", (user_id,))
     full_day_row = cursor.fetchone()
     full_day_id = full_day_row["id"] if full_day_row else None
     
     return goal_id, full_day_id
 
-def evaluate_goal_for_date(date_str, conn=None):
-    """
-    Evaluates whether 'Goal' should be ticked on a specific date:
-    - Normal rule: Completed count of regular tasks (excluding Goal and Full Day) >= threshold
-    - Full Day rule: If 'Full Day' is checked AND at least 1 regular task is checked on that date,
-      then Goal is considered achieved!
-    """
+def evaluate_goal_for_date(user_id, date_str, conn=None):
     should_close = False
     if conn is None:
         conn = get_connection()
         should_close = True
         
     cursor = conn.cursor()
-    threshold = get_goal_threshold()
+    threshold = get_goal_threshold(user_id)
     
-    goal_id, full_day_id = get_special_task_ids(cursor)
+    goal_id, full_day_id = get_special_task_ids(user_id, cursor)
     if not goal_id:
         if should_close:
             conn.close()
@@ -328,7 +456,7 @@ def evaluate_goal_for_date(date_str, conn=None):
     # Check if 'Full Day' is checked on this date
     full_day_checked = False
     if full_day_id:
-        cursor.execute("SELECT completed FROM completions WHERE task_id = ? AND date = ?", (full_day_id, date_str))
+        cursor.execute("SELECT completed FROM completions WHERE user_id = ? AND task_id = ? AND date = ?", (user_id, full_day_id, date_str))
         f_row = cursor.fetchone()
         full_day_checked = bool(f_row and f_row["completed"] == 1)
         
@@ -342,14 +470,23 @@ def evaluate_goal_for_date(date_str, conn=None):
     SELECT COUNT(DISTINCT t.id) AS cnt
     FROM completions c
     JOIN tasks t ON c.task_id = t.id
-    WHERE c.date = ? 
+    WHERE c.user_id = ?
+      AND c.date = ? 
       AND c.completed = 1 
       AND t.is_archived = 0
       AND t.parent_id IS NULL
       AND t.id NOT IN ({placeholders})
-    """, [date_str] + excluded_ids)
+    """, [user_id, date_str] + excluded_ids)
     
     regular_completed = cursor.fetchone()["cnt"]
+
+    # Full Day rule: Full Day cannot stay checked if 0 regular tasks are done
+    if regular_completed == 0 and full_day_id and full_day_checked:
+        cursor.execute("""
+        UPDATE completions SET completed = 0, updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = ? AND task_id = ? AND date = ?
+        """, (user_id, full_day_id, date_str))
+        full_day_checked = False
     
     # Goal condition:
     # 1. regular_completed >= threshold, OR
@@ -360,27 +497,28 @@ def evaluate_goal_for_date(date_str, conn=None):
         goal_state = 0
         
     cursor.execute("""
-    INSERT INTO completions (task_id, date, completed, updated_at)
-    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+    INSERT INTO completions (user_id, task_id, date, completed, updated_at)
+    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(task_id, date) DO UPDATE SET completed = excluded.completed, updated_at = CURRENT_TIMESTAMP
-    """, (goal_id, date_str, goal_state))
+    """, (user_id, goal_id, date_str, goal_state))
     
-    cursor.execute("""
-    INSERT INTO daily_summaries (date, daily_goal_achieved, updated_at)
-    VALUES (?, ?, CURRENT_TIMESTAMP)
-    ON CONFLICT(date) DO UPDATE SET daily_goal_achieved = excluded.daily_goal_achieved, updated_at = CURRENT_TIMESTAMP
-    """, (date_str, goal_state))
-    
+    cursor.execute("SELECT rowid AS rid FROM daily_summaries WHERE user_id = ? AND date = ?", (user_id, date_str))
+    d_row = cursor.fetchone()
+    if d_row:
+        cursor.execute("UPDATE daily_summaries SET daily_goal_achieved = ?, updated_at = CURRENT_TIMESTAMP WHERE rowid = ?", (goal_state, d_row["rid"]))
+    else:
+        cursor.execute("INSERT INTO daily_summaries (user_id, date, daily_goal_achieved) VALUES (?, ?, ?)", (user_id, date_str, goal_state))
+        
     conn.commit()
     if should_close:
         conn.close()
     return bool(goal_state)
 
-def recalculate_all_goals(threshold: int):
+def recalculate_all_goals(user_id, threshold: int):
     conn = get_connection()
     cursor = conn.cursor()
     
-    goal_id, full_day_id = get_special_task_ids(cursor)
+    goal_id, full_day_id = get_special_task_ids(user_id, cursor)
     if not goal_id:
         conn.close()
         return
@@ -395,19 +533,19 @@ def recalculate_all_goals(threshold: int):
     SELECT c.date, COUNT(DISTINCT t.id) as cnt
     FROM completions c
     JOIN tasks t ON c.task_id = t.id
-    WHERE c.completed = 1 AND t.is_archived = 0 AND t.parent_id IS NULL AND t.id NOT IN ({placeholders})
+    WHERE c.user_id = ? AND c.completed = 1 AND t.is_archived = 0 AND t.parent_id IS NULL AND t.id NOT IN ({placeholders})
     GROUP BY c.date
-    """, excluded_ids)
+    """, [user_id] + excluded_ids)
     date_counts = {r["date"]: r["cnt"] for r in cursor.fetchall()}
     
     # Dates with Full Day checked
     full_day_dates = set()
     if full_day_id:
-        cursor.execute("SELECT date FROM completions WHERE task_id = ? AND completed = 1", (full_day_id,))
+        cursor.execute("SELECT date FROM completions WHERE user_id = ? AND task_id = ? AND completed = 1", (user_id, full_day_id))
         full_day_dates = {r["date"] for r in cursor.fetchall()}
         
     # Existing Goal dates
-    cursor.execute("SELECT date FROM completions WHERE task_id = ? AND completed = 1", (goal_id,))
+    cursor.execute("SELECT date FROM completions WHERE user_id = ? AND task_id = ? AND completed = 1", (user_id, goal_id))
     existing_goal_dates = {r["date"] for r in cursor.fetchall()}
     
     all_dates = set(date_counts.keys()).union(full_day_dates).union(existing_goal_dates)
@@ -417,43 +555,45 @@ def recalculate_all_goals(threshold: int):
         new_state = 1 if (cnt >= threshold or (fd and cnt >= 1)) else 0
         
         cursor.execute("""
-        INSERT INTO completions (task_id, date, completed, updated_at)
-        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+        INSERT INTO completions (user_id, task_id, date, completed, updated_at)
+        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT(task_id, date) DO UPDATE SET completed = excluded.completed, updated_at = CURRENT_TIMESTAMP
-        """, (goal_id, d_str, new_state))
-        cursor.execute("""
-        INSERT INTO daily_summaries (date, daily_goal_achieved, updated_at)
-        VALUES (?, ?, CURRENT_TIMESTAMP)
-        ON CONFLICT(date) DO UPDATE SET daily_goal_achieved = excluded.daily_goal_achieved, updated_at = CURRENT_TIMESTAMP
-        """, (d_str, new_state))
+        """, (user_id, goal_id, d_str, new_state))
         
+        cursor.execute("SELECT rowid AS rid FROM daily_summaries WHERE user_id = ? AND date = ?", (user_id, d_str))
+        d_row = cursor.fetchone()
+        if d_row:
+            cursor.execute("UPDATE daily_summaries SET daily_goal_achieved = ?, updated_at = CURRENT_TIMESTAMP WHERE rowid = ?", (new_state, d_row["rid"]))
+        else:
+            cursor.execute("INSERT INTO daily_summaries (user_id, date, daily_goal_achieved) VALUES (?, ?, ?)", (user_id, d_str, new_state))
+            
     conn.commit()
     conn.close()
 
 # ----------------- Tasks CRUD ----------------- #
 
-def get_all_tasks(include_archived=False):
+def get_all_tasks(user_id, include_archived=False):
     conn = get_connection()
     cursor = conn.cursor()
     
     top_arch = "" if include_archived else "AND is_archived = 0"
     cursor.execute(f"""
     SELECT * FROM tasks 
-    WHERE parent_id IS NULL {top_arch}
+    WHERE user_id = ? AND parent_id IS NULL {top_arch}
     ORDER BY 
         CASE WHEN LOWER(TRIM(title)) = 'goal' THEN 0 
              WHEN LOWER(TRIM(title)) = 'full day' THEN 1 
              ELSE 2 END,
         sort_order ASC, id ASC
-    """)
+    """, (user_id,))
     parents = [dict(r) for r in cursor.fetchall()]
     
     sub_arch = "" if include_archived else "AND is_archived = 0"
     cursor.execute(f"""
     SELECT * FROM tasks 
-    WHERE parent_id IS NOT NULL {sub_arch}
+    WHERE user_id = ? AND parent_id IS NOT NULL {sub_arch}
     ORDER BY sort_order ASC, id ASC
-    """)
+    """, (user_id,))
     subtasks = [dict(r) for r in cursor.fetchall()]
     conn.close()
     
@@ -469,7 +609,7 @@ def get_all_tasks(include_archived=False):
             
     return ordered
 
-def add_task(title, category="General", parent_id=None):
+def add_task(user_id, title, category="General", parent_id=None):
     clean_title = title.strip().lower()
     if clean_title in ("goal", "full day"):
         raise ValueError(f"Cannot create task named '{title}'. It is a reserved system task.")
@@ -484,7 +624,7 @@ def add_task(title, category="General", parent_id=None):
             conn.close()
             raise ValueError("Invalid parent task ID.")
             
-        cursor.execute("SELECT * FROM tasks WHERE id = ? AND is_archived = 0", (parent_id,))
+        cursor.execute("SELECT * FROM tasks WHERE id = ? AND user_id = ? AND is_archived = 0", (parent_id, user_id))
         parent_task = cursor.fetchone()
         if not parent_task:
             conn.close()
@@ -504,29 +644,29 @@ def add_task(title, category="General", parent_id=None):
         color = parent_task["color"] or "#94a3b8"
     else:
         category = category.strip()
-        color_map = get_category_color_map()
+        color_map = get_category_color_map(user_id)
         color = color_map.get(category, "#3b82f6")
         
-    cursor.execute("SELECT COALESCE(MAX(sort_order), 1) + 1 AS next_order FROM tasks")
+    cursor.execute("SELECT COALESCE(MAX(sort_order), 1) + 1 AS next_order FROM tasks WHERE user_id = ?", (user_id,))
     next_order = cursor.fetchone()["next_order"]
     
     cursor.execute("""
-    INSERT INTO tasks (title, category, color, icon, target_frequency, sort_order, parent_id)
-    VALUES (?, ?, ?, 'check-circle', 'daily', ?, ?)
-    """, (title.strip(), category, color, next_order, parent_id))
+    INSERT INTO tasks (user_id, title, category, color, icon, target_frequency, sort_order, parent_id)
+    VALUES (?, ?, ?, ?, 'check-circle', 'daily', ?, ?)
+    """, (user_id, title.strip(), category, color, next_order, parent_id))
     task_id = cursor.lastrowid
     conn.commit()
     
-    cursor.execute("SELECT * FROM tasks WHERE id = ?", (task_id,))
+    cursor.execute("SELECT * FROM tasks WHERE id = ? AND user_id = ?", (task_id, user_id))
     task = dict(cursor.fetchone())
     conn.close()
     return task
 
-def update_task(task_id, title=None, category=None, is_archived=None):
+def update_task(user_id, task_id, title=None, category=None, is_archived=None):
     conn = get_connection()
     cursor = conn.cursor()
     
-    cursor.execute("SELECT * FROM tasks WHERE id = ?", (task_id,))
+    cursor.execute("SELECT * FROM tasks WHERE id = ? AND user_id = ?", (task_id, user_id))
     existing = cursor.fetchone()
     if not existing:
         conn.close()
@@ -551,7 +691,7 @@ def update_task(task_id, title=None, category=None, is_archived=None):
         
     if category is not None and not is_subtask:
         cat = category.strip()
-        color_map = get_category_color_map()
+        color_map = get_category_color_map(user_id)
         color = color_map.get(cat, "#3b82f6")
         fields.append("category = ?")
         values.append(cat)
@@ -567,113 +707,148 @@ def update_task(task_id, title=None, category=None, is_archived=None):
         return dict(existing)
         
     values.append(task_id)
-    sql = f"UPDATE tasks SET {', '.join(fields)} WHERE id = ?"
+    values.append(user_id)
+    sql = f"UPDATE tasks SET {', '.join(fields)} WHERE id = ? AND user_id = ?"
     cursor.execute(sql, values)
     
     if is_archived and not is_subtask:
-        cursor.execute("UPDATE tasks SET is_archived = 1 WHERE parent_id = ?", (task_id,))
+        cursor.execute("UPDATE tasks SET is_archived = 1 WHERE parent_id = ? AND user_id = ?", (task_id, user_id))
         
     conn.commit()
     
-    cursor.execute("SELECT * FROM tasks WHERE id = ?", (task_id,))
+    cursor.execute("SELECT * FROM tasks WHERE id = ? AND user_id = ?", (task_id, user_id))
     row = cursor.fetchone()
     conn.close()
     return dict(row) if row else None
 
-def delete_task(task_id, hard_delete=False):
+def delete_task(user_id, task_id, hard_delete=False):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT title, parent_id FROM tasks WHERE id = ?", (task_id,))
+    cursor.execute("SELECT title, parent_id FROM tasks WHERE id = ? AND user_id = ?", (task_id, user_id))
     row = cursor.fetchone()
-    if row and row["title"].strip().lower() in ("goal", "full day"):
+    if not row:
+        conn.close()
+        return False
+        
+    if row["title"].strip().lower() in ("goal", "full day"):
         conn.close()
         raise ValueError(f"The '{row['title']}' task cannot be deleted.")
         
     if hard_delete:
-        cursor.execute("DELETE FROM completions WHERE task_id = ? OR task_id IN (SELECT id FROM tasks WHERE parent_id = ?)", (task_id, task_id))
-        cursor.execute("DELETE FROM tasks WHERE parent_id = ?", (task_id,))
-        cursor.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+        cursor.execute("DELETE FROM completions WHERE user_id = ? AND (task_id = ? OR task_id IN (SELECT id FROM tasks WHERE parent_id = ? AND user_id = ?))", (user_id, task_id, task_id, user_id))
+        cursor.execute("DELETE FROM tasks WHERE parent_id = ? AND user_id = ?", (task_id, user_id))
+        cursor.execute("DELETE FROM tasks WHERE id = ? AND user_id = ?", (task_id, user_id))
     else:
-        cursor.execute("UPDATE tasks SET is_archived = 1 WHERE id = ? OR parent_id = ?", (task_id, task_id))
+        cursor.execute("UPDATE tasks SET is_archived = 1 WHERE user_id = ? AND (id = ? OR parent_id = ?)", (user_id, task_id, task_id))
+        
     conn.commit()
     conn.close()
     return True
 
-def reorder_tasks(task_ids):
+def reorder_tasks(user_id, task_ids):
     conn = get_connection()
     cursor = conn.cursor()
-    # Goal is always 0, Full Day is always 1
-    cursor.execute("SELECT id FROM tasks WHERE LOWER(TRIM(title)) = 'goal' AND is_archived = 0 LIMIT 1")
+    
+    cursor.execute("SELECT id FROM tasks WHERE user_id = ? AND LOWER(TRIM(title)) = 'goal' AND is_archived = 0 LIMIT 1", (user_id,))
     goal_row = cursor.fetchone()
     goal_id = goal_row["id"] if goal_row else None
     
-    cursor.execute("SELECT id FROM tasks WHERE LOWER(TRIM(title)) = 'full day' AND is_archived = 0 LIMIT 1")
+    cursor.execute("SELECT id FROM tasks WHERE user_id = ? AND LOWER(TRIM(title)) = 'full day' AND is_archived = 0 LIMIT 1", (user_id,))
     full_day_row = cursor.fetchone()
     full_day_id = full_day_row["id"] if full_day_row else None
 
     if goal_id:
-        cursor.execute("UPDATE tasks SET sort_order = 0 WHERE id = ?", (goal_id,))
+        cursor.execute("UPDATE tasks SET sort_order = 0 WHERE id = ? AND user_id = ?", (goal_id, user_id))
     if full_day_id:
-        cursor.execute("UPDATE tasks SET sort_order = 1 WHERE id = ?", (full_day_id,))
+        cursor.execute("UPDATE tasks SET sort_order = 1 WHERE id = ? AND user_id = ?", (full_day_id, user_id))
 
-    # Custom regular task order starts at 2
     order_idx = 2
     for t_id in task_ids:
         if t_id not in (goal_id, full_day_id):
-            cursor.execute("UPDATE tasks SET sort_order = ? WHERE id = ?", (order_idx, t_id))
+            cursor.execute("UPDATE tasks SET sort_order = ? WHERE id = ? AND user_id = ?", (order_idx, t_id, user_id))
             order_idx += 1
             
+    if task_ids:
+        placeholders = ",".join("?" for _ in task_ids)
+        cursor.execute(f"""
+        SELECT id FROM tasks 
+        WHERE user_id = ? AND parent_id IS NULL AND id NOT IN ({placeholders}) 
+          AND LOWER(TRIM(title)) NOT IN ('goal', 'full day')
+        ORDER BY sort_order ASC, id ASC
+        """, [user_id] + task_ids)
+        for r in cursor.fetchall():
+            cursor.execute("UPDATE tasks SET sort_order = ? WHERE id = ? AND user_id = ?", (order_idx, r["id"], user_id))
+            order_idx += 1
+
     conn.commit()
     conn.close()
     return True
 
 # ----------------- Completions & Matrix ----------------- #
 
-def toggle_completion(task_id, date_str, target_state=None):
+def toggle_completion(user_id, task_id, date_str, target_state=None):
     conn = get_connection()
     cursor = conn.cursor()
     
-    cursor.execute("SELECT id, title, parent_id FROM tasks WHERE id = ?", (task_id,))
+    cursor.execute("SELECT id, title, parent_id FROM tasks WHERE id = ? AND user_id = ?", (task_id, user_id))
     task_row = cursor.fetchone()
     if not task_row:
         conn.close()
         raise ValueError("Task not found")
         
-    if task_row["title"].strip().lower() == "goal":
+    t_clean = task_row["title"].strip().lower()
+    if t_clean == "goal":
         conn.close()
         raise ValueError("The 'Goal' main task is automated and cannot be manually toggled.")
         
-    cursor.execute("SELECT completed FROM completions WHERE task_id = ? AND date = ?", (task_id, date_str))
+    cursor.execute("SELECT completed FROM completions WHERE user_id = ? AND task_id = ? AND date = ?", (user_id, task_id, date_str))
     row = cursor.fetchone()
     
     if target_state is not None:
         new_state = 1 if target_state else 0
     else:
         new_state = 0 if (row and row["completed"] == 1) else 1
+
+    # Full Day rule: Full Day cannot be checked if 0 regular tasks are completed on that date
+    if t_clean == "full day" and new_state == 1:
+        cursor.execute("""
+        SELECT COUNT(DISTINCT t.id) AS cnt
+        FROM completions c
+        JOIN tasks t ON c.task_id = t.id
+        WHERE c.user_id = ?
+          AND c.date = ?
+          AND c.completed = 1
+          AND t.is_archived = 0
+          AND t.parent_id IS NULL
+          AND LOWER(TRIM(t.title)) NOT IN ('goal', 'full day')
+        """, (user_id, date_str))
+        if cursor.fetchone()["cnt"] == 0:
+            conn.close()
+            raise ValueError("At least 1 habit must be checked before marking Full Day.")
         
     if row:
         cursor.execute("""
         UPDATE completions 
         SET completed = ?, updated_at = CURRENT_TIMESTAMP 
-        WHERE task_id = ? AND date = ?
-        """, (new_state, task_id, date_str))
+        WHERE user_id = ? AND task_id = ? AND date = ?
+        """, (new_state, user_id, task_id, date_str))
     else:
         cursor.execute("""
-        INSERT INTO completions (task_id, date, completed)
-        VALUES (?, ?, ?)
-        """, (task_id, date_str, new_state))
+        INSERT INTO completions (user_id, task_id, date, completed)
+        VALUES (?, ?, ?, ?)
+        """, (user_id, task_id, date_str, new_state))
         
-    # Automatic parent tick: ticking the checkbox of a subtask automatically ticks the parent!
+    # Automatic parent tick: ticking subtask automatically ticks the parent!
     parent_id = task_row["parent_id"]
     if parent_id and new_state == 1:
         cursor.execute("""
-        INSERT INTO completions (task_id, date, completed, updated_at)
-        VALUES (?, ?, 1, CURRENT_TIMESTAMP)
+        INSERT INTO completions (user_id, task_id, date, completed, updated_at)
+        VALUES (?, ?, ?, 1, CURRENT_TIMESTAMP)
         ON CONFLICT(task_id, date) DO UPDATE SET completed = 1, updated_at = CURRENT_TIMESTAMP
-        """, (parent_id, date_str))
+        """, (user_id, parent_id, date_str))
         
     conn.commit()
-    goal_completed = evaluate_goal_for_date(date_str, conn=conn)
+    goal_completed = evaluate_goal_for_date(user_id, date_str, conn=conn)
     conn.close()
     
     return {
@@ -684,10 +859,10 @@ def toggle_completion(task_id, date_str, target_state=None):
         "goal_auto_completed": goal_completed
     }
 
-def toggle_daily_goal(date_str, target_state=None):
+def toggle_daily_goal(user_id, date_str, target_state=None):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT daily_goal_achieved FROM daily_summaries WHERE date = ?", (date_str,))
+    cursor.execute("SELECT rowid AS rid, daily_goal_achieved FROM daily_summaries WHERE user_id = ? AND date = ?", (user_id, date_str))
     row = cursor.fetchone()
     
     if target_state is not None:
@@ -699,31 +874,32 @@ def toggle_daily_goal(date_str, target_state=None):
         cursor.execute("""
         UPDATE daily_summaries 
         SET daily_goal_achieved = ?, updated_at = CURRENT_TIMESTAMP 
-        WHERE date = ?
-        """, (new_state, date_str))
+        WHERE rowid = ?
+        """, (new_state, row["rid"]))
     else:
         cursor.execute("""
-        INSERT INTO daily_summaries (date, daily_goal_achieved)
-        VALUES (?, ?)
-        """, (date_str, new_state))
+        INSERT INTO daily_summaries (user_id, date, daily_goal_achieved)
+        VALUES (?, ?, ?)
+        """, (user_id, date_str, new_state))
         
     conn.commit()
     conn.close()
     return {"date": date_str, "daily_goal_achieved": bool(new_state)}
 
-def save_daily_note(date_str, note):
+def save_daily_note(user_id, date_str, note):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT date FROM daily_summaries WHERE date = ?", (date_str,))
-    if cursor.fetchone():
-        cursor.execute("UPDATE daily_summaries SET focus_note = ?, updated_at = CURRENT_TIMESTAMP WHERE date = ?", (note, date_str))
+    cursor.execute("SELECT rowid AS rid FROM daily_summaries WHERE user_id = ? AND date = ?", (user_id, date_str))
+    row = cursor.fetchone()
+    if row:
+        cursor.execute("UPDATE daily_summaries SET focus_note = ?, updated_at = CURRENT_TIMESTAMP WHERE rowid = ?", (note, row["rid"]))
     else:
-        cursor.execute("INSERT INTO daily_summaries (date, focus_note) VALUES (?, ?)", (date_str, note))
+        cursor.execute("INSERT INTO daily_summaries (user_id, date, focus_note) VALUES (?, ?, ?)", (user_id, date_str, note))
     conn.commit()
     conn.close()
     return {"date": date_str, "note": note}
 
-def get_matrix(year: int, month: int):
+def get_matrix(user_id: int, year: int, month: int):
     conn = get_connection()
     cursor = conn.cursor()
     
@@ -746,16 +922,15 @@ def get_matrix(year: int, month: int):
             "is_today": (date_str == today_str)
         })
         
-    # Fetch tasks in proper hierarchical order (parents followed by their subtasks)
-    tasks = get_all_tasks(include_archived=False)
+    tasks = get_all_tasks(user_id, include_archived=False)
     
     start_date = f"{year:04d}-{month:02d}-01"
     end_date = f"{year:04d}-{month:02d}-{num_days:02d}"
     cursor.execute("""
     SELECT task_id, date, completed 
     FROM completions 
-    WHERE date >= ? AND date <= ? AND completed = 1
-    """, (start_date, end_date))
+    WHERE user_id = ? AND date >= ? AND date <= ? AND completed = 1
+    """, (user_id, start_date, end_date))
     
     completed_map = set()
     for r in cursor.fetchall():
@@ -764,11 +939,11 @@ def get_matrix(year: int, month: int):
     cursor.execute("""
     SELECT date, daily_goal_achieved, focus_note 
     FROM daily_summaries 
-    WHERE date >= ? AND date <= ?
-    """, (start_date, end_date))
+    WHERE user_id = ? AND date >= ? AND date <= ?
+    """, (user_id, start_date, end_date))
     daily_summaries = {r["date"]: dict(r) for r in cursor.fetchall()}
     
-    threshold = get_goal_threshold()
+    threshold = get_goal_threshold(user_id)
     conn.close()
     
     task_rows = []
@@ -805,22 +980,23 @@ def get_matrix(year: int, month: int):
         "tasks": tasks,
         "matrix": task_rows,
         "total_tasks": len(tasks),
+        "total_habits": len([t for t in tasks if t["title"].strip().lower() not in ("goal", "full day")]),
         "num_days": num_days,
         "goal_threshold": threshold
     }
 
 # ----------------- Heatmap & Streaks ----------------- #
 
-def get_heatmap(year: int, task_id: int = None):
+def get_heatmap(user_id: int, year: int, task_id: int = None):
     conn = get_connection()
     cursor = conn.cursor()
     
-    cursor.execute("SELECT id FROM tasks WHERE LOWER(TRIM(title)) = 'goal' AND is_archived = 0 LIMIT 1")
+    cursor.execute("SELECT id FROM tasks WHERE user_id = ? AND LOWER(TRIM(title)) = 'goal' AND is_archived = 0 LIMIT 1", (user_id,))
     goal_row = cursor.fetchone()
     goal_id = goal_row["id"] if goal_row else None
     
     if task_id:
-        cursor.execute("SELECT * FROM tasks WHERE id = ?", (task_id,))
+        cursor.execute("SELECT * FROM tasks WHERE user_id = ? AND id = ?", (user_id, task_id))
         task_row = cursor.fetchone()
         filter_task = dict(task_row) if task_row else None
         total_tasks_target = 1
@@ -829,8 +1005,8 @@ def get_heatmap(year: int, task_id: int = None):
         # Heatmap counts regular tasks (excludes Goal and Full Day)
         cursor.execute("""
         SELECT COUNT(*) AS cnt FROM tasks 
-        WHERE is_archived = 0 AND LOWER(TRIM(title)) NOT IN ('goal', 'full day')
-        """)
+        WHERE user_id = ? AND is_archived = 0 AND LOWER(TRIM(title)) NOT IN ('goal', 'full day')
+        """, (user_id,))
         total_tasks_target = cursor.fetchone()["cnt"] or 1
         
     start_date = f"{year:04d}-01-01"
@@ -840,28 +1016,28 @@ def get_heatmap(year: int, task_id: int = None):
         cursor.execute("""
         SELECT date, COUNT(*) AS count
         FROM completions
-        WHERE date >= ? AND date <= ? AND task_id = ? AND completed = 1
+        WHERE user_id = ? AND date >= ? AND date <= ? AND task_id = ? AND completed = 1
         GROUP BY date
-        """, (start_date, end_date, task_id))
+        """, (user_id, start_date, end_date, task_id))
     else:
         cursor.execute("""
         SELECT c.date, COUNT(*) AS count
         FROM completions c
         JOIN tasks t ON c.task_id = t.id
-        WHERE c.date >= ? AND c.date <= ? AND c.completed = 1 AND t.is_archived = 0 
+        WHERE c.user_id = ? AND c.date >= ? AND c.date <= ? AND c.completed = 1 AND t.is_archived = 0 
           AND LOWER(TRIM(t.title)) NOT IN ('goal', 'full day')
         GROUP BY c.date
-        """, (start_date, end_date))
+        """, (user_id, start_date, end_date))
         
     day_counts = {r["date"]: r["count"] for r in cursor.fetchall()}
     
-    # Also fetch all dates where Goal was achieved (for Goal-based Streak calculation)
+    # Dates where Goal was achieved for this user
     goal_dates = set()
     if goal_id:
         cursor.execute("""
         SELECT date FROM completions 
-        WHERE date >= ? AND date <= ? AND task_id = ? AND completed = 1
-        """, (start_date, end_date, goal_id))
+        WHERE user_id = ? AND date >= ? AND date <= ? AND task_id = ? AND completed = 1
+        """, (user_id, start_date, end_date, goal_id))
         goal_dates = {r["date"] for r in cursor.fetchall()}
         
     if task_id:
@@ -869,16 +1045,16 @@ def get_heatmap(year: int, task_id: int = None):
         SELECT date, t.title
         FROM completions c
         JOIN tasks t ON c.task_id = t.id
-        WHERE date >= ? AND date <= ? AND task_id = ? AND completed = 1
-        """, (start_date, end_date, task_id))
+        WHERE c.user_id = ? AND c.date >= ? AND c.date <= ? AND task_id = ? AND completed = 1
+        """, (user_id, start_date, end_date, task_id))
     else:
         cursor.execute("""
         SELECT c.date, t.title
         FROM completions c
         JOIN tasks t ON c.task_id = t.id
-        WHERE c.date >= ? AND c.date <= ? AND c.completed = 1 AND t.is_archived = 0 
+        WHERE c.user_id = ? AND c.date >= ? AND c.date <= ? AND c.completed = 1 AND t.is_archived = 0 
           AND LOWER(TRIM(t.title)) NOT IN ('goal', 'full day')
-        """, (start_date, end_date))
+        """, (user_id, start_date, end_date))
         
     tasks_per_day = {}
     for r in cursor.fetchall():
@@ -937,14 +1113,13 @@ def get_heatmap(year: int, task_id: int = None):
         })
         cur += timedelta(days=1)
         
-    # --- Streak Calculation based on GOAL continuity ---
+    # Streak Calculation based on GOAL continuity
     longest_streak = 0
     cur_streak_run = 0
     
     for day_obj, d_str in all_dates:
         if day_obj > today:
             break
-        # Goal must be achieved on this day
         if d_str in goal_dates:
             cur_streak_run += 1
             if cur_streak_run > longest_streak:
@@ -954,7 +1129,6 @@ def get_heatmap(year: int, task_id: int = None):
             
     current_streak = 0
     check_date = today
-    # If Goal is not achieved today yet, allow continuation from yesterday
     if today_str not in goal_dates:
         check_date = today - timedelta(days=1)
         
@@ -977,14 +1151,14 @@ def get_heatmap(year: int, task_id: int = None):
 
 # ----------------- Year Overview & Statistics ----------------- #
 
-def get_yearly_stats(year: int):
+def get_yearly_stats(user_id: int, year: int):
     conn = get_connection()
     cursor = conn.cursor()
     
     cursor.execute("""
     SELECT COUNT(*) AS cnt FROM tasks 
-    WHERE is_archived = 0 AND LOWER(TRIM(title)) NOT IN ('goal', 'full day')
-    """)
+    WHERE user_id = ? AND is_archived = 0 AND LOWER(TRIM(title)) NOT IN ('goal', 'full day')
+    """, (user_id,))
     total_active_tasks = cursor.fetchone()["cnt"] or 1
     
     monthly_data = []
@@ -1001,9 +1175,9 @@ def get_yearly_stats(year: int):
         SELECT COUNT(*) AS cnt 
         FROM completions c
         JOIN tasks t ON c.task_id = t.id
-        WHERE c.date >= ? AND c.date <= ? AND c.completed = 1 AND t.is_archived = 0 
+        WHERE c.user_id = ? AND c.date >= ? AND c.date <= ? AND c.completed = 1 AND t.is_archived = 0 
           AND LOWER(TRIM(t.title)) NOT IN ('goal', 'full day')
-        """, (start_date, end_date))
+        """, (user_id, start_date, end_date))
         cnt = cursor.fetchone()["cnt"]
         total_year_completions += cnt
         
@@ -1035,30 +1209,31 @@ def get_yearly_stats(year: int):
 
 # ----------------- Export & Backup ----------------- #
 
-def export_all():
+def export_all(user_id: int):
     conn = get_connection()
     cursor = conn.cursor()
     
-    cursor.execute("SELECT * FROM categories")
+    cursor.execute("SELECT * FROM categories WHERE user_id = ?", (user_id,))
     categories = [dict(r) for r in cursor.fetchall()]
     
-    cursor.execute("SELECT * FROM tasks")
+    cursor.execute("SELECT * FROM tasks WHERE user_id = ?", (user_id,))
     tasks = [dict(r) for r in cursor.fetchall()]
     
-    cursor.execute("SELECT * FROM completions")
+    cursor.execute("SELECT * FROM completions WHERE user_id = ?", (user_id,))
     completions = [dict(r) for r in cursor.fetchall()]
     
-    cursor.execute("SELECT * FROM settings")
+    cursor.execute("SELECT * FROM settings WHERE user_id = ?", (user_id,))
     settings = [dict(r) for r in cursor.fetchall()]
     
-    cursor.execute("SELECT * FROM daily_summaries")
+    cursor.execute("SELECT * FROM daily_summaries WHERE user_id = ?", (user_id,))
     summaries = [dict(r) for r in cursor.fetchall()]
     
     conn.close()
     
     return {
         "exported_at": datetime.now().isoformat(),
-        "version": "3.1",
+        "version": "4.0",
+        "user_id": user_id,
         "categories": categories,
         "tasks": tasks,
         "completions": completions,
@@ -1066,16 +1241,16 @@ def export_all():
         "daily_summaries": summaries
     }
 
-def import_backup(data_dict):
+def import_backup(user_id: int, data_dict: dict):
     conn = get_connection()
     cursor = conn.cursor()
     
     if "categories" in data_dict:
         for c in data_dict["categories"]:
             cursor.execute("""
-            INSERT OR REPLACE INTO categories (id, name, color, sort_order)
+            INSERT OR REPLACE INTO categories (user_id, name, color, sort_order)
             VALUES (?, ?, ?, ?)
-            """, (c.get("id"), c["name"], c.get("color", "#3b82f6"), c.get("sort_order", 0)))
+            """, (user_id, c["name"], c.get("color", "#3b82f6"), c.get("sort_order", 0)))
             
     color_map = {c["name"]: c["color"] for c in data_dict.get("categories", [])}
     
@@ -1084,36 +1259,36 @@ def import_backup(data_dict):
             cat = t.get("category", "General")
             col = color_map.get(cat, t.get("color", "#3b82f6"))
             cursor.execute("""
-            INSERT OR REPLACE INTO tasks (id, title, category, color, icon, target_frequency, sort_order, is_archived)
+            INSERT INTO tasks (user_id, title, category, color, icon, target_frequency, sort_order, is_archived)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (t.get("id"), t.get("title"), cat, col,
+            """, (user_id, t.get("title"), cat, col,
                   t.get("icon", "check-circle"), t.get("target_frequency", "daily"),
                   t.get("sort_order", 0), t.get("is_archived", 0)))
                   
     if "completions" in data_dict:
         for c in data_dict["completions"]:
             cursor.execute("""
-            INSERT OR REPLACE INTO completions (id, task_id, date, completed, notes)
+            INSERT INTO completions (user_id, task_id, date, completed, notes)
             VALUES (?, ?, ?, ?, ?)
-            """, (c.get("id"), c["task_id"], c["date"], c.get("completed", 1), c.get("notes", "")))
+            """, (user_id, c["task_id"], c["date"], c.get("completed", 1), c.get("notes", "")))
             
     if "settings" in data_dict:
         for s in data_dict["settings"]:
             cursor.execute("""
-            INSERT OR REPLACE INTO settings (key, value)
-            VALUES (?, ?)
-            """, (s["key"], s["value"]))
+            INSERT INTO settings (user_id, key, value)
+            VALUES (?, ?, ?)
+            """, (user_id, s["key"], s["value"]))
             
     if "daily_summaries" in data_dict:
         for s in data_dict["daily_summaries"]:
             cursor.execute("""
-            INSERT OR REPLACE INTO daily_summaries (date, daily_goal_achieved, focus_note)
-            VALUES (?, ?, ?)
-            """, (s["date"], s.get("daily_goal_achieved", 0), s.get("focus_note", "")))
+            INSERT INTO daily_summaries (user_id, date, daily_goal_achieved, focus_note)
+            VALUES (?, ?, ?, ?)
+            """, (user_id, s["date"], s.get("daily_goal_achieved", 0), s.get("focus_note", "")))
             
     conn.commit()
     conn.close()
     
-    threshold = get_goal_threshold()
-    recalculate_all_goals(threshold)
+    threshold = get_goal_threshold(user_id)
+    recalculate_all_goals(user_id, threshold)
     return True

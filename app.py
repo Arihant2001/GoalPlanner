@@ -1,29 +1,106 @@
 import os
 import io
 import csv
-from datetime import datetime, date
-from flask import Flask, render_template, request, jsonify, send_file, send_from_directory
+from functools import wraps
+from datetime import datetime, date, timedelta
+from flask import Flask, render_template, request, jsonify, send_file, send_from_directory, session
+from werkzeug.security import generate_password_hash, check_password_hash
 import database
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "goalplanner-secret-key-2026")
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=3650)  # 10 years persistent login
 
-# Initialize SQLite database on startup
+# Initialize SQLite database schema and migrations on startup
 database.init_db()
+
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if "user_id" not in session:
+            return jsonify({"success": False, "error": "Authentication required", "requires_login": True}), 401
+        return f(*args, **kwargs)
+    return decorated_function
 
 @app.route("/")
 def index():
     now = datetime.now()
     return render_template("index.html", initial_year=now.year, initial_month=now.month)
 
+@app.route("/favicon.ico")
+def favicon():
+    return send_from_directory(os.path.join(app.root_path, "static", "icons"), "favicon.ico", mimetype="image/vnd.microsoft.icon")
+
+# ----------------- Authentication Endpoints ----------------- #
+
+@app.route("/api/auth/me", methods=["GET"])
+def auth_me():
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"success": True, "user": None})
+    user = database.get_user_by_id(user_id)
+    if not user:
+        session.clear()
+        return jsonify({"success": True, "user": None})
+    return jsonify({"success": True, "user": {"id": user["id"], "username": user["username"]}})
+
+@app.route("/api/auth/register", methods=["POST"])
+def auth_register():
+    data = request.get_json() or {}
+    username = data.get("username", "").strip()
+    password = data.get("password", "").strip()
+    remember = data.get("remember", True)
+    
+    if not username or len(username) < 3:
+        return jsonify({"success": False, "error": "Username must be at least 3 characters long."}), 400
+    if not password or len(password) < 6:
+        return jsonify({"success": False, "error": "Password must be at least 6 characters long."}), 400
+        
+    password_hash = generate_password_hash(password)
+    try:
+        user = database.create_user(username, password_hash)
+        session.permanent = bool(remember)
+        session["user_id"] = user["id"]
+        session["username"] = user["username"]
+        return jsonify({"success": True, "user": {"id": user["id"], "username": user["username"]}}), 201
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+@app.route("/api/auth/login", methods=["POST"])
+def auth_login():
+    data = request.get_json() or {}
+    username = data.get("username", "").strip()
+    password = data.get("password", "").strip()
+    remember = data.get("remember", True)
+    
+    if not username or not password:
+        return jsonify({"success": False, "error": "Username and password are required."}), 400
+        
+    user = database.get_user_by_username(username)
+    if not user or not check_password_hash(user["password_hash"], password):
+        return jsonify({"success": False, "error": "Invalid username or password."}), 401
+        
+    session.permanent = bool(remember)
+    session["user_id"] = user["id"]
+    session["username"] = user["username"]
+    database.seed_user_defaults(user["id"])
+    return jsonify({"success": True, "user": {"id": user["id"], "username": user["username"]}})
+
+@app.route("/api/auth/logout", methods=["POST"])
+def auth_logout():
+    session.clear()
+    return jsonify({"success": True, "message": "Logged out successfully"})
+
 # ----------------- Categories Endpoints ----------------- #
 
 @app.route("/api/categories", methods=["GET"])
+@login_required
 def list_categories():
-    categories = database.get_all_categories()
+    categories = database.get_all_categories(session["user_id"])
     return jsonify({"success": True, "categories": categories})
 
 @app.route("/api/categories", methods=["POST"])
+@login_required
 def create_category():
     data = request.get_json() or {}
     name = data.get("name", "").strip()
@@ -34,26 +111,28 @@ def create_category():
         return jsonify({"success": False, "error": "Category color is required"}), 400
         
     try:
-        cat = database.add_category(name=name, color=color)
+        cat = database.add_category(session["user_id"], name=name, color=color)
         return jsonify({"success": True, "category": cat}), 201
     except ValueError as e:
         return jsonify({"success": False, "error": str(e)}), 400
 
 @app.route("/api/categories/<int:cat_id>", methods=["PUT"])
+@login_required
 def update_category_endpoint(cat_id):
     data = request.get_json() or {}
     name = data.get("name")
     color = data.get("color")
     try:
-        updated = database.update_category(cat_id=cat_id, name=name, color=color)
+        updated = database.update_category(session["user_id"], cat_id=cat_id, name=name, color=color)
         return jsonify({"success": True, "category": updated})
     except ValueError as e:
         return jsonify({"success": False, "error": str(e)}), 400
 
 @app.route("/api/categories/<int:cat_id>", methods=["DELETE"])
+@login_required
 def delete_category_endpoint(cat_id):
     try:
-        database.delete_category(cat_id=cat_id)
+        database.delete_category(session["user_id"], cat_id=cat_id)
         return jsonify({"success": True, "message": "Category removed"})
     except ValueError as e:
         return jsonify({"success": False, "error": str(e)}), 400
@@ -61,33 +140,37 @@ def delete_category_endpoint(cat_id):
 # ----------------- Tasks Endpoints ----------------- #
 
 @app.route("/api/tasks", methods=["GET"])
+@login_required
 def list_tasks():
     include_archived = request.args.get("include_archived", "false").lower() == "true"
-    tasks = database.get_all_tasks(include_archived=include_archived)
+    tasks = database.get_all_tasks(session["user_id"], include_archived=include_archived)
     return jsonify({"success": True, "tasks": tasks})
 
 @app.route("/api/tasks", methods=["POST"])
+@login_required
 def create_task():
     data = request.get_json() or {}
     title = data.get("title", "").strip()
     if not title:
         return jsonify({"success": False, "error": "Task title is required"}), 400
-    if title.lower() == "goal":
-        return jsonify({"success": False, "error": "'Goal' is reserved as the main task and cannot be created."}), 400
+    if title.lower() in ("goal", "full day"):
+        return jsonify({"success": False, "error": f"'{title}' is reserved as a main task and cannot be created."}), 400
         
     category = data.get("category", "Mind")
     parent_id = data.get("parent_id")
     try:
-        task = database.add_task(title=title, category=category, parent_id=parent_id)
+        task = database.add_task(session["user_id"], title=title, category=category, parent_id=parent_id)
         return jsonify({"success": True, "task": task}), 201
     except ValueError as e:
         return jsonify({"success": False, "error": str(e)}), 400
 
 @app.route("/api/tasks/<int:task_id>", methods=["PUT"])
+@login_required
 def update_task_endpoint(task_id):
     data = request.get_json() or {}
     try:
         updated = database.update_task(
+            session["user_id"],
             task_id=task_id,
             title=data.get("title"),
             category=data.get("category"),
@@ -100,24 +183,27 @@ def update_task_endpoint(task_id):
         return jsonify({"success": False, "error": str(e)}), 400
 
 @app.route("/api/tasks/<int:task_id>", methods=["DELETE"])
+@login_required
 def delete_task_endpoint(task_id):
     hard_delete = request.args.get("hard", "false").lower() == "true"
     try:
-        database.delete_task(task_id=task_id, hard_delete=hard_delete)
+        database.delete_task(session["user_id"], task_id=task_id, hard_delete=hard_delete)
         return jsonify({"success": True, "message": "Task removed"})
     except ValueError as e:
         return jsonify({"success": False, "error": str(e)}), 400
 
 @app.route("/api/tasks/reorder", methods=["POST"])
+@login_required
 def reorder_tasks_endpoint():
     data = request.get_json() or {}
     task_ids = data.get("task_ids", [])
-    database.reorder_tasks(task_ids)
+    database.reorder_tasks(session["user_id"], task_ids)
     return jsonify({"success": True})
 
 # ----------------- Matrix View Endpoints ----------------- #
 
 @app.route("/api/matrix", methods=["GET"])
+@login_required
 def get_matrix_data():
     now = datetime.now()
     year = int(request.args.get("year", now.year))
@@ -126,10 +212,11 @@ def get_matrix_data():
     if month < 1 or month > 12:
         return jsonify({"success": False, "error": "Invalid month"}), 400
         
-    data = database.get_matrix(year, month)
+    data = database.get_matrix(session["user_id"], year, month)
     return jsonify({"success": True, "data": data})
 
 @app.route("/api/toggle", methods=["POST"])
+@login_required
 def toggle_task_completion():
     data = request.get_json() or {}
     task_id = data.get("task_id")
@@ -140,13 +227,15 @@ def toggle_task_completion():
         return jsonify({"success": False, "error": "task_id and date are required"}), 400
         
     try:
-        result = database.toggle_completion(task_id=int(task_id), date_str=date_str, target_state=state)
+        result = database.toggle_completion(session["user_id"], task_id=int(task_id), date_str=date_str, target_state=state)
         return jsonify({"success": True, "result": result})
     except ValueError as e:
         return jsonify({"success": False, "error": str(e)}), 400
 
 @app.route("/api/settings/threshold", methods=["GET", "POST"])
+@login_required
 def goal_threshold_endpoint():
+    user_id = session["user_id"]
     if request.method == "POST":
         data = request.get_json() or {}
         val = data.get("threshold")
@@ -159,13 +248,14 @@ def goal_threshold_endpoint():
         except ValueError:
             return jsonify({"success": False, "error": "Threshold must be an integer"}), 400
             
-        saved_val = database.set_setting("goal_threshold", val)
+        saved_val = database.set_setting(user_id, "goal_threshold", val)
         return jsonify({"success": True, "threshold": int(saved_val)})
     else:
-        threshold = database.get_goal_threshold()
+        threshold = database.get_goal_threshold(user_id)
         return jsonify({"success": True, "threshold": threshold})
 
 @app.route("/api/daily-note", methods=["POST"])
+@login_required
 def save_daily_note_endpoint():
     data = request.get_json() or {}
     date_str = data.get("date")
@@ -174,34 +264,37 @@ def save_daily_note_endpoint():
     if not date_str:
         return jsonify({"success": False, "error": "date is required"}), 400
         
-    result = database.save_daily_note(date_str=date_str, note=note)
+    result = database.save_daily_note(session["user_id"], date_str=date_str, note=note)
     return jsonify({"success": True, "result": result})
 
 # ----------------- Heatmap & Yearly Stats ----------------- #
 
 @app.route("/api/heatmap", methods=["GET"])
+@login_required
 def get_heatmap_endpoint():
     now = datetime.now()
     year = int(request.args.get("year", now.year))
     task_id_param = request.args.get("task_id")
     task_id = int(task_id_param) if task_id_param and task_id_param != "all" else None
     
-    data = database.get_heatmap(year=year, task_id=task_id)
+    data = database.get_heatmap(session["user_id"], year=year, task_id=task_id)
     return jsonify({"success": True, "data": data})
 
 @app.route("/api/yearly-stats", methods=["GET"])
+@login_required
 def get_yearly_stats_endpoint():
     now = datetime.now()
     year = int(request.args.get("year", now.year))
-    data = database.get_yearly_stats(year=year)
+    data = database.get_yearly_stats(session["user_id"], year=year)
     return jsonify({"success": True, "data": data})
 
 # ----------------- Export & Backup ----------------- #
 
 @app.route("/api/export", methods=["GET"])
+@login_required
 def export_data():
     fmt = request.args.get("format", "json").lower()
-    data = database.export_all()
+    data = database.export_all(session["user_id"])
     
     if fmt == "json":
         return jsonify(data)
@@ -235,6 +328,7 @@ def export_data():
     )
 
 @app.route("/api/import", methods=["POST"])
+@login_required
 def import_data():
     if "file" not in request.files:
         data = request.get_json()
@@ -248,7 +342,7 @@ def import_data():
         except Exception as e:
             return jsonify({"success": False, "error": f"Invalid JSON file: {str(e)}"}), 400
             
-    database.import_backup(data)
+    database.import_backup(session["user_id"], data)
     return jsonify({"success": True, "message": "Backup imported successfully"})
 
 # ----------------- PWA Files ----------------- #

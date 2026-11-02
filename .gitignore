@@ -4,8 +4,9 @@ data/*.sqlite
 data/*.sqlite3
 *.db
 
-# Project internal instructions / agent blueprints
+# Project internal instructions / agent blueprints / markdown
 PROJECT_INSTRUCTIONS.md
+*.md
 
 
 # Python & Environment

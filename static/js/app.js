@@ -1,5 +1,6 @@
 // Global Application State
 const state = {
+    user: null,
     currentYear: new Date().getFullYear(),
     currentMonth: new Date().getMonth() + 1,
     todayDateStr: new Date().toISOString().split("T")[0],
@@ -14,12 +15,187 @@ const state = {
 document.addEventListener("DOMContentLoaded", () => {
     initTheme();
     initStateFromUI();
+    checkAuth();
+});
+
+// ----------------- Authentication Management ----------------- //
+
+async function checkAuth() {
+    try {
+        const res = await fetch("/api/auth/me");
+        const json = await res.json();
+        if (json.success && json.user) {
+            onAuthSuccess(json.user);
+        } else {
+            showAuthModal();
+        }
+    } catch (err) {
+        showAuthModal();
+    }
+}
+
+function onAuthSuccess(user) {
+    state.user = user;
+    const userSection = document.getElementById("user-header-section");
+    const nameDisplay = document.getElementById("current-username-display");
+    if (userSection) {
+        userSection.classList.remove("hidden");
+        userSection.classList.add("flex");
+    }
+    if (nameDisplay) nameDisplay.textContent = user.username;
+    
+    hideAuthModal();
     loadCategories().then(() => {
         loadTasks();
     });
     loadThreshold();
     switchView("matrix");
-});
+}
+
+function showAuthModal() {
+    state.user = null;
+    const userSection = document.getElementById("user-header-section");
+    if (userSection) {
+        userSection.classList.add("hidden");
+        userSection.classList.remove("flex");
+    }
+    
+    const authModal = document.getElementById("auth-modal");
+    if (authModal) authModal.classList.remove("hidden");
+    clearAuthErrors();
+    lucide.createIcons();
+}
+
+function hideAuthModal() {
+    const authModal = document.getElementById("auth-modal");
+    if (authModal) authModal.classList.add("hidden");
+    clearAuthErrors();
+}
+
+function switchAuthTab(tab) {
+    const loginTab = document.getElementById("auth-tab-login");
+    const regTab = document.getElementById("auth-tab-register");
+    const loginForm = document.getElementById("login-form");
+    const regForm = document.getElementById("register-form");
+    clearAuthErrors();
+
+    if (tab === "login") {
+        loginTab.className = "flex-1 py-1.5 text-xs font-bold rounded-lg text-white bg-blue-600 shadow transition-all";
+        regTab.className = "flex-1 py-1.5 text-xs font-semibold rounded-lg text-slate-400 hover:text-white transition-all";
+        loginForm.classList.remove("hidden");
+        regForm.classList.add("hidden");
+    } else {
+        loginTab.className = "flex-1 py-1.5 text-xs font-semibold rounded-lg text-slate-400 hover:text-white transition-all";
+        regTab.className = "flex-1 py-1.5 text-xs font-bold rounded-lg text-white bg-emerald-600 shadow transition-all";
+        loginForm.classList.add("hidden");
+        regForm.classList.remove("hidden");
+    }
+}
+
+function setAuthError(msg) {
+    const box = document.getElementById("auth-error-box");
+    const txt = document.getElementById("auth-error-text");
+    if (box && txt) {
+        txt.textContent = msg;
+        box.classList.remove("hidden");
+    }
+}
+
+function clearAuthErrors() {
+    const box = document.getElementById("auth-error-box");
+    if (box) box.classList.add("hidden");
+}
+
+async function handleAuthLogin(event) {
+    event.preventDefault();
+    clearAuthErrors();
+    const btn = document.getElementById("login-submit-btn");
+    const username = document.getElementById("login-username").value.trim();
+    const password = document.getElementById("login-password").value.trim();
+    const remember = document.getElementById("login-remember").checked;
+
+    if (!username || !password) {
+        setAuthError("Please enter both username and password.");
+        return;
+    }
+
+    if (btn) btn.disabled = true;
+
+    try {
+        const res = await fetch("/api/auth/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username, password, remember })
+        });
+        const json = await res.json();
+        if (json.success && json.user) {
+            showToast(`Welcome back, ${json.user.username}!`, "success");
+            onAuthSuccess(json.user);
+        } else {
+            setAuthError(json.error || "Invalid username or password.");
+        }
+    } catch (err) {
+        setAuthError("Network error. Please try again.");
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
+async function handleAuthRegister(event) {
+    event.preventDefault();
+    clearAuthErrors();
+    const btn = document.getElementById("reg-submit-btn");
+    const username = document.getElementById("reg-username").value.trim();
+    const password = document.getElementById("reg-password").value.trim();
+    const passwordConfirm = document.getElementById("reg-password-confirm").value.trim();
+    const remember = document.getElementById("reg-remember").checked;
+
+    if (password !== passwordConfirm) {
+        setAuthError("Passwords do not match.");
+        return;
+    }
+
+    if (password.length < 6) {
+        setAuthError("Password must be at least 6 characters long.");
+        return;
+    }
+
+    if (btn) btn.disabled = true;
+
+    try {
+        const res = await fetch("/api/auth/register", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username, password, remember })
+        });
+        const json = await res.json();
+        if (json.success && json.user) {
+            showToast(`Account created! Welcome, ${json.user.username}!`, "success");
+            onAuthSuccess(json.user);
+        } else {
+            setAuthError(json.error || "Failed to create account.");
+        }
+    } catch (err) {
+        setAuthError("Network error. Please try again.");
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
+async function handleAuthLogout() {
+    try {
+        await fetch("/api/auth/logout", { method: "POST" });
+        showToast("Signed out successfully", "info");
+        state.tasks = [];
+        state.categories = [];
+        state.user = null;
+        const table = document.getElementById("matrix-table");
+        if (table) table.innerHTML = "";
+        showAuthModal();
+    } catch (err) {
+        showToast("Error signing out", "error");
+    }
+}
 
 function initStateFromUI() {
     const monthSelect = document.getElementById("matrix-month-select");
@@ -353,6 +529,97 @@ function onCategorySelectChange(category) {
     if (dot) dot.style.backgroundColor = color;
 }
 
+function populateParentHabitDropdown(selectedId = null) {
+    const parentSelect = document.getElementById("task-parent-select");
+    if (!parentSelect) return;
+    parentSelect.innerHTML = "";
+
+    const regularHabits = (currentMatrixData && currentMatrixData.matrix 
+        ? currentMatrixData.matrix.map(r => r.task) 
+        : (state.tasks || [])
+    ).filter(t => {
+        const titleLower = t.title.trim().toLowerCase();
+        return titleLower !== "goal" && titleLower !== "full day" && !t.parent_id;
+    });
+
+    if (regularHabits.length === 0) {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "No main habits found - create a main habit first";
+        parentSelect.appendChild(opt);
+        return;
+    }
+
+    regularHabits.forEach(h => {
+        const opt = document.createElement("option");
+        opt.value = h.id;
+        opt.textContent = `${h.title} (${h.category || 'General'})`;
+        parentSelect.appendChild(opt);
+    });
+
+    if (selectedId) {
+        parentSelect.value = selectedId;
+    } else if (regularHabits.length > 0) {
+        parentSelect.value = regularHabits[0].id;
+    }
+}
+
+function setTaskTypeSelection(type) {
+    const mainBtn = document.getElementById("type-btn-main");
+    const subtaskBtn = document.getElementById("type-btn-subtask");
+    const parentSelectGroup = document.getElementById("task-parent-select-group");
+    const parentInfo = document.getElementById("task-parent-info");
+    const categoryGroup = document.getElementById("task-category-group");
+    const parentIdInput = document.getElementById("task-parent-id-input");
+    const parentSelect = document.getElementById("task-parent-select");
+
+    if (type === "subtask") {
+        if (mainBtn) {
+            mainBtn.className = "py-1.5 px-3 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 text-slate-400 hover:text-white";
+        }
+        if (subtaskBtn) {
+            subtaskBtn.className = "py-1.5 px-3 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 bg-blue-600 text-white shadow-sm";
+        }
+        if (parentSelectGroup) parentSelectGroup.classList.remove("hidden");
+        if (categoryGroup) categoryGroup.classList.add("hidden");
+        
+        populateParentHabitDropdown(parentIdInput ? parentIdInput.value : null);
+        if (parentIdInput && parentSelect) {
+            parentIdInput.value = parentSelect.value || "";
+        }
+        if (parentInfo) {
+            parentInfo.classList.remove("hidden");
+            const infoText = document.getElementById("task-parent-info-text");
+            if (infoText && parentSelect) {
+                const parentTitle = parentSelect.options[parentSelect.selectedIndex] ? parentSelect.options[parentSelect.selectedIndex].text : "Parent habit";
+                infoText.innerHTML = `Subtask will be nested under <strong class="text-white">${parentTitle}</strong>. Checking it automatically ticks the parent habit.`;
+            }
+        }
+    } else {
+        if (mainBtn) {
+            mainBtn.className = "py-1.5 px-3 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 bg-blue-600 text-white shadow-sm";
+        }
+        if (subtaskBtn) {
+            subtaskBtn.className = "py-1.5 px-3 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 text-slate-400 hover:text-white";
+        }
+        if (parentSelectGroup) parentSelectGroup.classList.add("hidden");
+        if (parentInfo) parentInfo.classList.add("hidden");
+        if (categoryGroup) categoryGroup.classList.remove("hidden");
+        if (parentIdInput) parentIdInput.value = "";
+    }
+}
+
+function onParentSelectChange(selectedId) {
+    const parentIdInput = document.getElementById("task-parent-id-input");
+    if (parentIdInput) parentIdInput.value = selectedId;
+    const infoText = document.getElementById("task-parent-info-text");
+    const parentSelect = document.getElementById("task-parent-select");
+    if (infoText && parentSelect) {
+        const parentTitle = parentSelect.options[parentSelect.selectedIndex] ? parentSelect.options[parentSelect.selectedIndex].text : "Parent habit";
+        infoText.innerHTML = `Subtask will be nested under <strong class="text-white">${parentTitle}</strong>. Checking it automatically ticks the parent habit.`;
+    }
+}
+
 function openAddTaskModal() {
     document.getElementById("task-modal-title").innerHTML = '<i data-lucide="plus-circle" class="w-5 h-5 text-blue-400"></i> Add New Task';
     document.getElementById("task-id-input").value = "";
@@ -361,12 +628,16 @@ function openAddTaskModal() {
     document.getElementById("task-title-input").disabled = false;
     document.getElementById("task-delete-btn").classList.add("hidden");
     document.getElementById("task-add-subtask-modal-btn").classList.add("hidden");
-    document.getElementById("task-parent-info").classList.add("hidden");
-    document.getElementById("task-category-group").classList.remove("hidden");
+    
+    // Show Task Type selector for creating new tasks
+    const typeGroup = document.getElementById("task-type-selector-group");
+    if (typeGroup) typeGroup.classList.remove("hidden");
+    setTaskTypeSelection("main");
 
     populateCategoryDropdowns();
     document.getElementById("task-modal").classList.remove("hidden");
     lucide.createIcons();
+    setTimeout(() => document.getElementById("task-title-input").focus(), 100);
 }
 
 function openAddSubtaskModal(parentId, parentTitle) {
@@ -378,14 +649,14 @@ function openAddSubtaskModal(parentId, parentTitle) {
     document.getElementById("task-delete-btn").classList.add("hidden");
     document.getElementById("task-add-subtask-modal-btn").classList.add("hidden");
     
-    // Subtasks have no category
-    document.getElementById("task-category-group").classList.add("hidden");
-    
-    const infoText = document.getElementById("task-parent-info-text");
-    if (infoText) {
-        infoText.innerHTML = `Adding subtask to <strong class="text-white">${parentTitle}</strong>. Subtasks have no category and will automatically tick <strong class="text-white">${parentTitle}</strong> when completed.`;
+    // Show Task Type selector and toggle to subtask
+    const typeGroup = document.getElementById("task-type-selector-group");
+    if (typeGroup) typeGroup.classList.remove("hidden");
+    setTaskTypeSelection("subtask");
+    if (parentId) {
+        populateParentHabitDropdown(parentId);
+        onParentSelectChange(parentId);
     }
-    document.getElementById("task-parent-info").classList.remove("hidden");
 
     document.getElementById("task-modal").classList.remove("hidden");
     lucide.createIcons();
@@ -411,6 +682,12 @@ function openEditTaskModal(task) {
     document.getElementById("task-title-input").value = task.title;
     document.getElementById("task-title-input").disabled = false;
     document.getElementById("task-delete-btn").classList.remove("hidden");
+
+    // Hide Task Type selector while editing existing task
+    const typeGroup = document.getElementById("task-type-selector-group");
+    if (typeGroup) typeGroup.classList.add("hidden");
+    const parentSelectGroup = document.getElementById("task-parent-select-group");
+    if (parentSelectGroup) parentSelectGroup.classList.add("hidden");
 
     if (isSubtask) {
         document.getElementById("task-modal-title").innerHTML = '<i data-lucide="corner-down-right" class="w-5 h-5 text-blue-400"></i> Edit Subtask';
@@ -449,7 +726,12 @@ function closeTaskModal() {
 async function handleTaskSubmit(event) {
     event.preventDefault();
     const taskId = document.getElementById("task-id-input").value;
-    const parentId = document.getElementById("task-parent-id-input").value;
+    let parentId = document.getElementById("task-parent-id-input").value;
+    const parentSelectGroup = document.getElementById("task-parent-select-group");
+    const parentSelect = document.getElementById("task-parent-select");
+    if (!parentId && parentSelectGroup && !parentSelectGroup.classList.contains("hidden") && parentSelect) {
+        parentId = parentSelect.value;
+    }
     const title = document.getElementById("task-title-input").value.trim();
 
     if (title.toLowerCase() === "goal" || title.toLowerCase() === "full day") {
@@ -854,3 +1136,8 @@ window.openEditTaskModal = openEditTaskModal;
 window.closeTaskModal = closeTaskModal;
 window.handleTaskSubmit = handleTaskSubmit;
 window.handleTaskDelete = handleTaskDelete;
+window.switchAuthTab = switchAuthTab;
+window.handleAuthLogin = handleAuthLogin;
+window.handleAuthRegister = handleAuthRegister;
+window.handleAuthLogout = handleAuthLogout;
+window.showAuthModal = showAuthModal;

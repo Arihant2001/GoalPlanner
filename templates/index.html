@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>GoalPlanner - Daily Habit & Goal Matrix</title>
+    <link rel="icon" type="image/svg+xml" href="/static/icons/favicon.svg">
+    <link rel="alternate icon" type="image/png" href="/static/icons/favicon.png">
+    <link rel="shortcut icon" href="/static/icons/favicon.ico">
     <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#0f172a">
     
@@ -29,7 +32,7 @@
     </script>
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
-    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/style.css?v=4.2">
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col font-sans transition-colors duration-200">
 
@@ -92,6 +95,17 @@
                 <button id="theme-toggle" onclick="toggleTheme()" class="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/60 transition-all" title="Toggle Theme">
                     <i id="theme-icon" data-lucide="sun" class="w-4 h-4 text-amber-400"></i>
                 </button>
+
+                <!-- User Profile & Log Out -->
+                <div id="user-header-section" class="hidden items-center gap-2 pl-2 border-l border-slate-800">
+                    <div class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-800/90 text-xs text-slate-300 font-medium border border-slate-700/60 shadow-sm">
+                        <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+                        <span id="current-username-display" class="font-bold text-white max-w-[110px] truncate">User</span>
+                    </div>
+                    <button onclick="handleAuthLogout()" class="p-2 rounded-xl bg-slate-800 hover:bg-red-500/20 text-slate-400 hover:text-red-400 border border-slate-700/60 transition-all" title="Sign Out">
+                        <i data-lucide="log-out" class="w-4 h-4"></i>
+                    </button>
+                </div>
             </div>
         </div>
     </header>
@@ -173,16 +187,10 @@
             <!-- Spreadsheet Grid Container -->
             <div class="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
                 <div id="matrix-scroll-wrapper" class="overflow-x-auto overflow-y-auto max-h-[72vh] relative custom-scrollbar">
-                    <table id="matrix-table" class="w-full border-collapse text-left text-xs sm:text-sm select-none">
+                    <table id="matrix-table" class="text-left text-xs sm:text-sm select-none">
                         <!-- Dynamically filled by matrix.js -->
                     </table>
                 </div>
-            </div>
-
-            <!-- Hint footer -->
-            <div class="flex items-center justify-between text-xs text-slate-500 px-2">
-                <p>💡 Tip: Complete <span id="threshold-hint-text" class="text-amber-400 font-semibold">3 tasks</span> (or check <strong>Full Day</strong> with 1 task) to automatically achieve your main daily <strong>Goal</strong>.</p>
-                <p id="matrix-last-updated" class="italic"></p>
             </div>
         </section>
 
@@ -418,6 +426,29 @@
                 <input type="hidden" id="task-id-input" value="">
                 <input type="hidden" id="task-parent-id-input" value="">
 
+                <!-- Task Type Selector Toggle (Main Habit vs Subtask) -->
+                <div id="task-type-selector-group" class="space-y-1.5">
+                    <label class="block text-xs font-semibold text-slate-300">Task Type</label>
+                    <div class="grid grid-cols-2 gap-2 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                        <button type="button" id="type-btn-main" onclick="setTaskTypeSelection('main')" class="py-1.5 px-3 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 bg-blue-600 text-white shadow-sm">
+                            <i data-lucide="check-square" class="w-3.5 h-3.5"></i>
+                            <span>Main Habit</span>
+                        </button>
+                        <button type="button" id="type-btn-subtask" onclick="setTaskTypeSelection('subtask')" class="py-1.5 px-3 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 text-slate-400 hover:text-white">
+                            <i data-lucide="corner-down-right" class="w-3.5 h-3.5"></i>
+                            <span>Subtask</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Parent Habit Selector (Shown when Subtask is chosen) -->
+                <div id="task-parent-select-group" class="space-y-1.5 hidden">
+                    <label class="block text-xs font-semibold text-slate-300">Parent Habit *</label>
+                    <select id="task-parent-select" onchange="onParentSelectChange(this.value)" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer">
+                        <!-- Populated dynamically with regular habits -->
+                    </select>
+                </div>
+
                 <!-- Subtask Information Banner (shown when adding or editing a subtask) -->
                 <div id="task-parent-info" class="hidden text-xs text-blue-300 bg-blue-500/10 p-2.5 rounded-xl border border-blue-500/20 flex items-start gap-2">
                     <i data-lucide="corner-down-right" class="w-4 h-4 text-blue-400 flex-shrink-0 mt-0.5"></i>
@@ -506,13 +537,89 @@
         </div>
     </div>
 
+    <!-- Authentication Modal (Sign In / Sign Up) -->
+    <div id="auth-modal" class="fixed inset-0 z-[100] bg-black/85 backdrop-blur-md hidden flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-sm w-full p-6 sm:p-7 shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-200">
+            <!-- Brand Icon -->
+            <div class="text-center space-y-1">
+                <div class="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-gradient-to-tr from-amber-500 to-amber-300 text-slate-950 font-black shadow-lg shadow-amber-500/20 mb-1">
+                    <i data-lucide="crown" class="w-6 h-6"></i>
+                </div>
+                <h2 class="text-xl font-black text-white tracking-tight">GoalPlanner</h2>
+                <p class="text-xs text-slate-400">Daily habit matrix & goal consistency system</p>
+            </div>
+
+            <!-- Tab Switcher -->
+            <div class="flex items-center p-1 bg-slate-950 rounded-xl border border-slate-800">
+                <button id="auth-tab-login" type="button" onclick="switchAuthTab('login')" class="flex-1 py-1.5 text-xs font-bold rounded-lg text-white bg-blue-600 shadow transition-all">
+                    Sign In
+                </button>
+                <button id="auth-tab-register" type="button" onclick="switchAuthTab('register')" class="flex-1 py-1.5 text-xs font-semibold rounded-lg text-slate-400 hover:text-white transition-all">
+                    Create Account
+                </button>
+            </div>
+
+            <!-- Error Box -->
+            <div id="auth-error-box" class="hidden p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs flex items-center gap-2">
+                <i data-lucide="alert-circle" class="w-4 h-4 flex-shrink-0 text-red-400"></i>
+                <span id="auth-error-text"></span>
+            </div>
+
+            <!-- Sign In Form -->
+            <form id="login-form" onsubmit="handleAuthLogin(event)" class="space-y-3.5">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 mb-1">Username</label>
+                    <input type="text" id="login-username" required placeholder="Enter your username" autocomplete="username" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 mb-1">Password</label>
+                    <input type="password" id="login-password" required placeholder="••••••••" autocomplete="current-password" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div class="flex items-center justify-between text-xs text-slate-400">
+                    <label class="flex items-center gap-2 cursor-pointer select-none">
+                        <input type="checkbox" id="login-remember" checked class="rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500">
+                        <span>Remember me on this device</span>
+                    </label>
+                </div>
+                <button type="submit" id="login-submit-btn" class="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 font-bold text-sm text-white shadow-lg shadow-blue-600/30 transition-all active:scale-[0.98]">
+                    Sign In
+                </button>
+            </form>
+
+            <!-- Register Form -->
+            <form id="register-form" onsubmit="handleAuthRegister(event)" class="space-y-3.5 hidden">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 mb-1">Choose Username *</label>
+                    <input type="text" id="reg-username" required placeholder="at least 3 characters" autocomplete="username" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 mb-1">Create Password *</label>
+                    <input type="password" id="reg-password" required placeholder="at least 6 characters" autocomplete="new-password" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 mb-1">Confirm Password *</label>
+                    <input type="password" id="reg-password-confirm" required placeholder="re-enter password" autocomplete="new-password" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div class="flex items-center justify-between text-xs text-slate-400">
+                    <label class="flex items-center gap-2 cursor-pointer select-none">
+                        <input type="checkbox" id="reg-remember" checked class="rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500">
+                        <span>Remember me on this device</span>
+                    </label>
+                </div>
+                <button type="submit" id="reg-submit-btn" class="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 font-bold text-sm text-white shadow-lg shadow-emerald-600/30 transition-all active:scale-[0.98]">
+                    Create Account & Get Started
+                </button>
+            </form>
+        </div>
+    </div>
+
     <!-- Floating Toast Container -->
     <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
 
     <!-- App Scripts -->
-    <script src="/static/js/app.js"></script>
-    <script src="/static/js/matrix.js"></script>
-    <script src="/static/js/heatmap.js"></script>
+    <script src="/static/js/app.js?v=4.2"></script>
+    <script src="/static/js/matrix.js?v=4.2"></script>
+    <script src="/static/js/heatmap.js?v=4.2"></script>
     <script>
         document.addEventListener("DOMContentLoaded", () => {
             lucide.createIcons();
