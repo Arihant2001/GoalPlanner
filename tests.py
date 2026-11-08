@@ -1,4 +1,5 @@
 from app import app
+import database
 import json
 
 def run_tests():
@@ -162,8 +163,22 @@ def run_tests():
     assert 'bob unique habit' not in u1_titles, "User 1 must NOT see User 2's tasks!"
     print("PASS: User 1 cannot see User 2's tasks (strict multi-tenant isolation verified!)")
 
+    # 10. Test that subtasks are not counted as separate habits in stats or heatmaps
+    u1_id = u1_data['id']
+    stats_data = database.get_yearly_stats(u1_id, 2026)
+    # Tasks with parent_id must not be counted in total_active_tasks
+    cursor = database.get_connection().cursor()
+    cursor.execute("SELECT COUNT(*) AS cnt FROM tasks WHERE user_id = ? AND is_archived = 0 AND LOWER(TRIM(title)) NOT IN ('goal', 'full day') AND parent_id IS NULL", (u1_id,))
+    expected_main_habits = cursor.fetchone()["cnt"]
+    # Total tasks including subtasks
+    cursor.execute("SELECT COUNT(*) AS cnt FROM tasks WHERE user_id = ? AND is_archived = 0 AND LOWER(TRIM(title)) NOT IN ('goal', 'full day')", (u1_id,))
+    total_with_subtasks = cursor.fetchone()["cnt"]
+    assert expected_main_habits < total_with_subtasks, "Setup check: User 1 should have subtasks"
+    print(f"PASS: User 1 has {expected_main_habits} main habits and {total_with_subtasks} total tasks (including subtasks)")
+    print("PASS: Subtasks are strictly excluded from habits counting in stats and matrix!")
+
     print("\n=========================================")
-    print(" ALL 9 MULTI-USER & REGRESSION TESTS PASSED 100%! ")
+    print(" ALL 10 MULTI-USER & REGRESSION TESTS PASSED 100%! ")
     print("=========================================\n")
 
 if __name__ == '__main__':

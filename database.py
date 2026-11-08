@@ -1002,10 +1002,10 @@ def get_heatmap(user_id: int, year: int, task_id: int = None):
         total_tasks_target = 1
     else:
         filter_task = None
-        # Heatmap counts regular tasks (excludes Goal and Full Day)
+        # Heatmap counts regular tasks (excludes Goal, Full Day, and Subtasks)
         cursor.execute("""
         SELECT COUNT(*) AS cnt FROM tasks 
-        WHERE user_id = ? AND is_archived = 0 AND LOWER(TRIM(title)) NOT IN ('goal', 'full day')
+        WHERE user_id = ? AND is_archived = 0 AND LOWER(TRIM(title)) NOT IN ('goal', 'full day') AND parent_id IS NULL
         """, (user_id,))
         total_tasks_target = cursor.fetchone()["cnt"] or 1
         
@@ -1025,7 +1025,7 @@ def get_heatmap(user_id: int, year: int, task_id: int = None):
         FROM completions c
         JOIN tasks t ON c.task_id = t.id
         WHERE c.user_id = ? AND c.date >= ? AND c.date <= ? AND c.completed = 1 AND t.is_archived = 0 
-          AND LOWER(TRIM(t.title)) NOT IN ('goal', 'full day')
+          AND LOWER(TRIM(t.title)) NOT IN ('goal', 'full day') AND t.parent_id IS NULL
         GROUP BY c.date
         """, (user_id, start_date, end_date))
         
@@ -1157,7 +1157,7 @@ def get_yearly_stats(user_id: int, year: int):
     
     cursor.execute("""
     SELECT COUNT(*) AS cnt FROM tasks 
-    WHERE user_id = ? AND is_archived = 0 AND LOWER(TRIM(title)) NOT IN ('goal', 'full day')
+    WHERE user_id = ? AND is_archived = 0 AND LOWER(TRIM(title)) NOT IN ('goal', 'full day') AND parent_id IS NULL
     """, (user_id,))
     total_active_tasks = cursor.fetchone()["cnt"] or 1
     
@@ -1176,7 +1176,7 @@ def get_yearly_stats(user_id: int, year: int):
         FROM completions c
         JOIN tasks t ON c.task_id = t.id
         WHERE c.user_id = ? AND c.date >= ? AND c.date <= ? AND c.completed = 1 AND t.is_archived = 0 
-          AND LOWER(TRIM(t.title)) NOT IN ('goal', 'full day')
+          AND LOWER(TRIM(t.title)) NOT IN ('goal', 'full day') AND t.parent_id IS NULL
         """, (user_id, start_date, end_date))
         cnt = cursor.fetchone()["cnt"]
         total_year_completions += cnt

@@ -102,13 +102,13 @@ function renderHeatmapGrid(data) {
         }
     });
 
-    // Color mapper for GitHub levels
+    // Color mapper for GitHub levels (Themed via CSS for light & dark mode)
     const colorClasses = [
-        "bg-slate-800/80 border border-slate-700/50",              // Level 0
-        "bg-emerald-950 border border-emerald-900/60",             // Level 1
-        "bg-emerald-800 border border-emerald-700/60",             // Level 2
-        "bg-emerald-600 border border-emerald-500/60",             // Level 3
-        "bg-emerald-400 border border-emerald-300 shadow-sm shadow-emerald-400/40" // Level 4
+        "heatmap-cell-0",
+        "heatmap-cell-1",
+        "heatmap-cell-2",
+        "heatmap-cell-3",
+        "heatmap-cell-4"
     ];
 
     let gridHtml = "";

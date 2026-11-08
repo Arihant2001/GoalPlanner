@@ -427,14 +427,14 @@ function switchView(viewName) {
     state.activeView = viewName;
 
     document.querySelectorAll(".view-tab").forEach(tab => {
-        tab.classList.remove("text-white", "bg-blue-600", "shadow-sm");
+        tab.classList.remove("text-white", "bg-blue-600", "shadow-sm", "active");
         tab.classList.add("text-slate-400");
     });
 
     const activeTab = document.getElementById(`view-tab-${viewName}`);
     if (activeTab) {
         activeTab.classList.remove("text-slate-400");
-        activeTab.classList.add("text-white", "bg-blue-600", "shadow-sm");
+        activeTab.classList.add("text-white", "bg-blue-600", "shadow-sm", "active");
     }
 
     document.getElementById("view-matrix").classList.toggle("hidden", viewName !== "matrix");
@@ -514,7 +514,7 @@ function populateHeatmapTaskFilter() {
     select.innerHTML = '<option value="all">⚡ All Habits (Aggregate)</option>';
     state.tasks.forEach(task => {
         const tTitle = task.title.trim().toLowerCase();
-        if (tTitle === "goal" || tTitle === "full day") return;
+        if (tTitle === "goal" || tTitle === "full day" || task.parent_id) return;
         const opt = document.createElement("option");
         opt.value = task.id;
         opt.textContent = `${task.title} (${task.category})`;
@@ -876,7 +876,7 @@ async function loadTodayChecklist() {
             <div class="flex items-center justify-between">
                 <div class="flex items-center gap-3">
                     <div class="w-9 h-9 rounded-xl ${goalIsCompleted ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-amber-400'} flex items-center justify-center font-bold">
-                        <i data-lucide="crown" class="w-5 h-5"></i>
+                        <i data-lucide="target" class="w-5 h-5"></i>
                     </div>
                     <div>
                         <div class="font-bold text-sm text-white flex items-center gap-1.5">
@@ -895,28 +895,57 @@ async function loadTodayChecklist() {
         `;
         container.appendChild(goalCard);
 
+        const collapsedSet = (() => {
+            try {
+                return new Set(JSON.parse(localStorage.getItem("goalplanner_collapsed_subtasks") || "[]"));
+            } catch (e) {
+                return new Set();
+            }
+        })();
+
         matrixData.matrix.forEach(row => {
             const task = row.task;
             if (row.is_goal || task.title.trim().toLowerCase() === "goal") return;
 
             const isSubtask = Boolean(task.parent_id);
             const isCompleted = row.cells[dayIdx] || false;
+            const isParentCollapsed = isSubtask && task.parent_id && collapsedSet.has(task.parent_id);
+
+            const subtasks = !isSubtask ? matrixData.matrix.filter(r => r.task.parent_id === task.id) : [];
+            const hasSubtasks = subtasks.length > 0;
+            const isCollapsed = hasSubtasks && collapsedSet.has(task.id);
+
             const card = document.createElement("div");
+            const taskColor = task.color || (isSubtask ? '#60a5fa' : '#3b82f6');
             card.className = `flex items-center justify-between p-3.5 rounded-xl border transition-all cursor-pointer select-none ${
-                isSubtask ? "ml-6 pl-4 border-l-2 border-l-slate-700 " : ""
+                isParentCollapsed ? "hidden " : ""
+            }${
+                isSubtask ? "ml-6 pl-4 " : ""
             }${
                 isCompleted 
                 ? "bg-slate-900/90 border-emerald-500/30 text-white shadow-sm" 
                 : "bg-slate-900/40 border-slate-800 text-slate-300 hover:border-slate-700"
             }`;
+            card.style.borderLeft = `3.5px solid ${taskColor}`;
 
             card.innerHTML = `
-                <div class="flex items-center gap-3">
-                    ${isSubtask ? '<span class="text-slate-500 font-bold text-xs">↳</span>' : ''}
-                    <div class="${isSubtask ? 'w-2.5 h-2.5' : 'w-3.5 h-3.5'} rounded-full flex-shrink-0" style="background-color: ${task.color || '#3b82f6'}"></div>
+                <div class="flex items-center gap-2">
+                    ${isSubtask ? '<i data-lucide="corner-down-right" class="w-3.5 h-3.5 text-blue-400 flex-shrink-0"></i>' : ''}
                     <div>
-                        <div class="font-semibold text-sm ${isCompleted ? 'line-through text-slate-400' : 'text-white'}">${task.title}</div>
-                        <div class="text-[11px] text-slate-400">${isSubtask ? '<span class="text-slate-500">Subtask</span>' : (task.category || 'General')}</div>
+                        <div class="font-semibold text-sm flex items-center gap-1.5 ${isCompleted ? 'line-through text-slate-400' : 'text-white'}">
+                            <span>${task.title}</span>
+                            ${hasSubtasks ? `
+                            <button type="button" onclick="event.stopPropagation(); window.toggleParentSubtasks(${task.id}, event);" class="p-0.5 rounded hover:bg-slate-800 text-slate-400 hover:text-white transition-colors flex items-center justify-center flex-shrink-0" title="${isCollapsed ? `Expand ${subtasks.length} subtasks` : `Collapse ${subtasks.length} subtasks`}">
+                                <i data-lucide="${isCollapsed ? 'chevron-right' : 'chevron-down'}" class="w-3.5 h-3.5"></i>
+                            </button>
+                            ` : ''}
+                            ${hasSubtasks && isCollapsed ? `
+                            <span onclick="event.stopPropagation(); window.toggleParentSubtasks(${task.id}, event);" class="cursor-pointer text-[10px] px-1.5 py-0.2 rounded-full bg-blue-500/10 text-blue-400 font-medium select-none">
+                                ${subtasks.length} sub
+                            </span>
+                            ` : ''}
+                        </div>
+                        ${!isSubtask ? `<div class="text-[11px] text-slate-400">${task.category || 'General'}</div>` : ''}
                     </div>
                 </div>
                 <input type="checkbox" ${isCompleted ? 'checked' : ''} class="matrix-checkbox pointer-events-none" style="${isCompleted ? `background-color: ${task.color || '#3b82f6'}; border-color: ${task.color || '#3b82f6'};` : ''}">

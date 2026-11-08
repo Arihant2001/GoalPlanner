@@ -14,18 +14,24 @@
     background: rgba(100, 116, 139, 1);
 }
 
+html:not(.dark) .custom-scrollbar::-webkit-scrollbar-track {
+    background: #f1f5f9;
+}
+html:not(.dark) .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+}
+html:not(.dark) .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+}
+
 /* Custom Styled Select Dropdowns with inward arrow */
 select {
     appearance: none;
     -webkit-appearance: none;
     -moz-appearance: none;
     border-radius: 0.75rem !important;
-    border: 1px solid rgba(51, 65, 85, 0.8) !important;
-    background-color: #1e293b !important;
-    color: #f1f5f9 !important;
     padding-left: 0.85rem !important;
     padding-right: 2.25rem !important;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2394a3b8' stroke-width='2.2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E") !important;
     background-repeat: no-repeat !important;
     background-position: right 0.75rem center !important;
     background-size: 1rem 1rem !important;
@@ -33,15 +39,28 @@ select {
     cursor: pointer !important;
 }
 
-select:hover {
+html.dark select {
+    border: 1px solid rgba(51, 65, 85, 0.8) !important;
+    background-color: #1e293b !important;
+    color: #f1f5f9 !important;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2394a3b8' stroke-width='2.2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E") !important;
+}
+
+html.dark select:hover {
     background-color: #273549 !important;
     border-color: rgba(100, 116, 139, 0.9) !important;
 }
 
-select:focus {
+html.dark select:focus {
     outline: none !important;
     border-color: #3b82f6 !important;
     box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3) !important;
+}
+
+html.dark select option {
+    background-color: #0f172a !important;
+    color: #f8fafc !important;
+    padding: 8px 12px !important;
 }
 
 #goal-threshold-select {
@@ -49,24 +68,6 @@ select:focus {
     background-size: 0.85rem 0.85rem !important;
     padding-right: 1.75rem !important;
     padding-left: 0.5rem !important;
-}
-
-select option {
-    background-color: #0f172a !important;
-    color: #f8fafc !important;
-    padding: 8px 12px !important;
-}
-
-html:not(.dark) select {
-    background-color: #f1f5f9 !important;
-    color: #0f172a !important;
-    border-color: #cbd5e1 !important;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23475569' stroke-width='2.2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E") !important;
-}
-
-html:not(.dark) select option {
-    background-color: #ffffff !important;
-    color: #0f172a !important;
 }
 
 /* Matrix Table Layout & Geometry Enforcement */
@@ -82,295 +83,65 @@ html:not(.dark) select option {
     position: sticky;
     top: 0;
     z-index: 35;
-    background-color: #0f172a !important;
 }
 
-/* 1. Date Header Sticky Cells */
-.sticky-top-left {
-    position: sticky;
-    left: 0;
-    z-index: 50;
-    width: 220px !important;
-    min-width: 220px !important;
-    max-width: 220px !important;
-    box-sizing: border-box !important;
-    background-color: #0f172a !important;
-    opacity: 1 !important;
-}
-
-.sticky-header {
-    width: 36px !important;
-    min-width: 36px !important;
-    max-width: 36px !important;
-    box-sizing: border-box !important;
-    background-color: #0f172a !important;
-    opacity: 1 !important;
-}
-
-.sticky-summary-header {
-    position: sticky !important;
-    right: 0 !important;
-    z-index: 50 !important;
-    width: 70px !important;
-    min-width: 70px !important;
-    max-width: 70px !important;
-    box-sizing: border-box !important;
-    background-color: #0f172a !important;
-    opacity: 1 !important;
-}
-
-/* 2. Sticky Fixed Goal Row (Row 2 in thead) - 100% Opaque Solid */
-tr.goal-row {
-    background-color: #1a1f2e !important;
-    opacity: 1 !important;
-}
-
-.sticky-goal-left {
-    position: sticky;
-    left: 0;
-    z-index: 50;
-    width: 220px !important;
-    min-width: 220px !important;
-    max-width: 220px !important;
-    box-sizing: border-box !important;
-    background-color: #1a1f2e !important;
-    opacity: 1 !important;
-}
-
-.sticky-goal-cell {
-    width: 36px !important;
-    min-width: 36px !important;
-    max-width: 36px !important;
-    box-sizing: border-box !important;
-    background-color: #1a1f2e !important;
-    opacity: 1 !important;
-}
-
-.sticky-goal-summary {
-    position: sticky !important;
-    right: 0 !important;
-    z-index: 50 !important;
-    width: 70px !important;
-    min-width: 70px !important;
-    max-width: 70px !important;
-    box-sizing: border-box !important;
-    background-color: #1a1f2e !important;
-    opacity: 1 !important;
-}
-
-/* 3. Sticky Fixed Full Day Row (Row 3 in thead) - 100% Opaque Solid */
-tr.fullday-row {
-    background-color: #171c28 !important;
-    opacity: 1 !important;
-    border-bottom: 2px solid rgba(100, 116, 139, 0.8) !important;
-}
-
-.sticky-fullday-left {
-    position: sticky;
-    left: 0;
-    z-index: 50;
-    width: 220px !important;
-    min-width: 220px !important;
-    max-width: 220px !important;
-    box-sizing: border-box !important;
-    background-color: #171c28 !important;
-    opacity: 1 !important;
-}
-
-.sticky-fullday-cell {
-    width: 36px !important;
-    min-width: 36px !important;
-    max-width: 36px !important;
-    box-sizing: border-box !important;
-    background-color: #171c28 !important;
-    opacity: 1 !important;
-}
-
-.sticky-fullday-summary {
-    position: sticky !important;
-    right: 0 !important;
-    z-index: 50 !important;
-    width: 70px !important;
-    min-width: 70px !important;
-    max-width: 70px !important;
-    box-sizing: border-box !important;
-    background-color: #171c28 !important;
-    opacity: 1 !important;
-}
-
-/* 4. Regular Habit Columns in tbody */
+/* 1. Sticky Left Columns (Responsive Width: default 170px) */
+.sticky-top-left,
+.sticky-goal-left,
+.sticky-fullday-left,
 .sticky-col {
     position: sticky;
     left: 0;
-    z-index: 20;
-    width: 220px !important;
-    min-width: 220px !important;
-    max-width: 220px !important;
+    width: var(--task-col-width, 170px) !important;
+    min-width: var(--task-col-width, 170px) !important;
+    max-width: var(--task-col-width, 170px) !important;
     box-sizing: border-box !important;
-    background-color: #0f172a !important;
     opacity: 1 !important;
 }
 
+.sticky-top-left,
+.sticky-goal-left,
+.sticky-fullday-left {
+    z-index: 50;
+}
+
+.sticky-col {
+    z-index: 20;
+}
+
+/* 2. Day Columns (Responsive Width: default 32px) */
+.sticky-header,
+.sticky-goal-cell,
+.sticky-fullday-cell,
+.matrix-day-cell {
+    width: var(--day-col-width, 32px) !important;
+    min-width: var(--day-col-width, 32px) !important;
+    max-width: var(--day-col-width, 32px) !important;
+    box-sizing: border-box !important;
+}
+
+/* 3. Sticky Right Summary Column (Responsive Width: default 52px) */
+.sticky-summary-header,
+.sticky-goal-summary,
+.sticky-fullday-summary,
 .sticky-summary-col {
     position: sticky !important;
     right: 0 !important;
+    width: var(--total-col-width, 52px) !important;
+    min-width: var(--total-col-width, 52px) !important;
+    max-width: var(--total-col-width, 52px) !important;
+    box-sizing: border-box !important;
+    opacity: 1 !important;
+}
+
+.sticky-summary-header,
+.sticky-goal-summary,
+.sticky-fullday-summary {
+    z-index: 50 !important;
+}
+
+.sticky-summary-col {
     z-index: 20 !important;
-    width: 70px !important;
-    min-width: 70px !important;
-    max-width: 70px !important;
-    box-sizing: border-box !important;
-    background-color: #0f172a !important;
-    opacity: 1 !important;
-}
-
-/* Subtask Row Distinct Visual Hierarchy & Slim Row Height */
-tr.subtask-row td {
-    padding-top: 0.15rem !important;
-    padding-bottom: 0.15rem !important;
-    height: 32px !important;
-    min-height: 32px !important;
-    max-height: 32px !important;
-    background-color: #080d1a !important;
-    border-bottom: 1px solid rgba(30, 41, 59, 0.5) !important;
-}
-
-tr.subtask-row:hover td {
-    background-color: #0e172c !important;
-}
-
-tr.subtask-row td.sticky-col {
-    background-color: #080d1a !important;
-    border-left: 3px solid rgba(59, 130, 246, 0.6) !important;
-}
-
-tr.subtask-row:hover td.sticky-col {
-    background-color: #0e172c !important;
-}
-
-tr.subtask-row td.sticky-summary-col {
-    background-color: #080d1a !important;
-}
-
-tr.subtask-row:hover td.sticky-summary-col {
-    background-color: #0e172c !important;
-}
-
-tr.subtask-row .matrix-checkbox {
-    width: 17px !important;
-    height: 17px !important;
-    border-radius: 4px;
-    border-color: rgba(148, 163, 184, 0.35);
-}
-
-tr.subtask-row .matrix-checkbox:checked::before {
-    width: 8px;
-    height: 5px;
-}
-
-.matrix-day-cell {
-    width: 36px !important;
-    min-width: 36px !important;
-    max-width: 36px !important;
-    box-sizing: border-box !important;
-}
-
-/* Light Mode Overrides */
-html:not(.dark) {
-    background-color: #f8fafc;
-    color: #0f172a;
-}
-html:not(.dark) body {
-    background-color: #f8fafc;
-    color: #0f172a;
-}
-html:not(.dark) header {
-    background-color: rgba(255, 255, 255, 0.95);
-    border-color: #e2e8f0;
-}
-html:not(.dark) #matrix-table {
-    color: #0f172a;
-}
-html:not(.dark) .bg-slate-900 {
-    background-color: #ffffff !important;
-    border-color: #e2e8f0 !important;
-}
-html:not(.dark) .bg-slate-950 {
-    background-color: #f1f5f9 !important;
-    border-color: #cbd5e1 !important;
-}
-html:not(.dark) .bg-slate-800 {
-    background-color: #e2e8f0 !important;
-    color: #0f172a !important;
-}
-html:not(.dark) .text-white {
-    color: #0f172a !important;
-}
-html:not(.dark) .text-slate-400 {
-    color: #64748b !important;
-}
-html:not(.dark) .text-slate-300 {
-    color: #475569 !important;
-}
-html:not(.dark) .border-slate-800 {
-    border-color: #e2e8f0 !important;
-}
-html:not(.dark) .border-slate-700 {
-    border-color: #cbd5e1 !important;
-}
-
-html:not(.dark) .sticky-top-left,
-html:not(.dark) .sticky-header,
-html:not(.dark) .sticky-summary-header,
-html:not(.dark) .sticky-col,
-html:not(.dark) .sticky-summary-col {
-    background-color: #ffffff !important;
-    opacity: 1 !important;
-}
-
-html:not(.dark) tr.goal-row,
-html:not(.dark) .sticky-goal-left,
-html:not(.dark) .sticky-goal-cell,
-html:not(.dark) .sticky-goal-summary {
-    background-color: #fef9c3 !important;
-    opacity: 1 !important;
-}
-
-html:not(.dark) tr.fullday-row,
-html:not(.dark) .sticky-fullday-left,
-html:not(.dark) .sticky-fullday-cell,
-html:not(.dark) .sticky-fullday-summary {
-    background-color: #fef3c7 !important;
-    opacity: 1 !important;
-}
-
-html:not(.dark) tr.subtask-row td {
-    background-color: #f1f5f9 !important;
-}
-html:not(.dark) tr.subtask-row:hover td {
-    background-color: #e2e8f0 !important;
-}
-html:not(.dark) tr.subtask-row td.sticky-col {
-    background-color: #f1f5f9 !important;
-    border-left: 3px solid rgba(37, 99, 235, 0.6) !important;
-}
-html:not(.dark) tr.subtask-row:hover td.sticky-col {
-    background-color: #e2e8f0 !important;
-}
-html:not(.dark) tr.subtask-row td.sticky-summary-col {
-    background-color: #f1f5f9 !important;
-}
-html:not(.dark) tr.subtask-row:hover td.sticky-summary-col {
-    background-color: #e2e8f0 !important;
-}
-
-html:not(.dark) .today-header {
-    background: linear-gradient(rgba(37, 99, 235, 0.20), rgba(37, 99, 235, 0.20)), #ffffff !important;
-    box-shadow: inset 2px 0 0 #2563eb, inset -2px 0 0 #2563eb !important;
-}
-
-html:not(.dark) .today-cell {
-    background-color: rgba(59, 130, 246, 0.05) !important;
-    box-shadow: none !important;
 }
 
 /* Drag and drop row styling */
@@ -433,41 +204,607 @@ tr.drag-over-row td {
     transform: rotate(-45deg) translate(1px, -1px);
 }
 
-/* Goal & Full Day Rows Checkbox & Highlighting */
-tr.goal-row {
+.goal-checkbox:disabled {
+    cursor: not-allowed;
+}
+
+/* Subtask Checkbox */
+tr.subtask-row .matrix-checkbox {
+    width: 17px !important;
+    height: 17px !important;
+    border-radius: 4px;
+    border-color: rgba(148, 163, 184, 0.35);
+}
+
+tr.subtask-row .matrix-checkbox:checked::before {
+    width: 8px;
+    height: 5px;
+}
+
+/* =========================================================================
+   DARK MODE COLOR PALETTE
+   ========================================================================= */
+
+html.dark #matrix-table thead {
+    background-color: #0f172a !important;
+}
+
+html.dark .sticky-top-left,
+html.dark .sticky-header,
+html.dark .sticky-summary-header {
+    background-color: #0f172a !important;
+    color: #cbd5e1;
+}
+
+html.dark tr.goal-row {
     background-color: #1a1f2e !important;
     border-bottom: 1px solid rgba(234, 179, 8, 0.3) !important;
     opacity: 1 !important;
 }
 
-tr.fullday-row {
+html.dark .sticky-goal-left,
+html.dark .sticky-goal-cell,
+html.dark .sticky-goal-summary {
+    background-color: #1a1f2e !important;
+    opacity: 1 !important;
+}
+
+html.dark tr.fullday-row {
     background-color: #171c28 !important;
     border-bottom: 2px solid rgba(100, 116, 139, 0.8) !important;
     opacity: 1 !important;
 }
 
-.goal-checkbox:disabled {
-    cursor: not-allowed;
+html.dark .sticky-fullday-left,
+html.dark .sticky-fullday-cell,
+html.dark .sticky-fullday-summary {
+    background-color: #171c28 !important;
+    opacity: 1 !important;
 }
 
-/* Weekend Tinting */
-.weekend-cell {
+html.dark .sticky-col,
+html.dark .sticky-summary-col {
+    background-color: #0f172a !important;
+    opacity: 1 !important;
+}
+
+/* Subtask Row in Dark Mode */
+html.dark tr.subtask-row td {
+    padding-top: 0.15rem !important;
+    padding-bottom: 0.15rem !important;
+    height: 32px !important;
+    min-height: 32px !important;
+    max-height: 32px !important;
+    background-color: #080d1a !important;
+    border-bottom: 1px solid rgba(30, 41, 59, 0.5) !important;
+}
+
+html.dark tr.subtask-row:hover td {
+    background-color: #0e172c !important;
+}
+
+html.dark tr.subtask-row td.sticky-col {
+    background-color: #080d1a !important;
+    border-left: 3px solid rgba(59, 130, 246, 0.6) !important;
+}
+
+html.dark tr.subtask-row:hover td.sticky-col {
+    background-color: #0e172c !important;
+}
+
+html.dark tr.subtask-row td.sticky-summary-col {
+    background-color: #080d1a !important;
+}
+
+html.dark tr.subtask-row:hover td.sticky-summary-col {
+    background-color: #0e172c !important;
+}
+
+/* Weekend Tinting in Dark Mode */
+html.dark .weekend-cell {
     background-color: rgba(245, 158, 11, 0.04);
 }
-.weekend-header {
+html.dark .weekend-header {
     background: linear-gradient(rgba(245, 158, 11, 0.15), rgba(245, 158, 11, 0.15)), #0f172a !important;
 }
 
-/* Today Column: Permanent vertical blue lines on DATE HEADER ONLY */
-.today-header {
+/* Today Column in Dark Mode */
+html.dark .today-header {
     background: linear-gradient(rgba(37, 99, 235, 0.28), rgba(37, 99, 235, 0.28)), #0f172a !important;
     box-shadow: inset 2px 0 0 #3b82f6, inset -2px 0 0 #3b82f6 !important;
 }
-
-/* Today Body Cells: subtle tint only, NO vertical blue lines */
-.today-cell {
+html.dark .today-cell {
     background-color: rgba(59, 130, 246, 0.07) !important;
     box-shadow: none !important;
+}
+
+/* =========================================================================
+   LIGHT MODE COLOR PALETTE (CLEAN, PLEASING & COHESIVE UX)
+   ========================================================================= */
+
+html:not(.dark) {
+    background-color: #f8fafc !important;
+    color: #0f172a !important;
+}
+
+html:not(.dark) body {
+    background-color: #f8fafc !important;
+    color: #0f172a !important;
+}
+
+/* Header & Top Bar */
+html:not(.dark) header {
+    background-color: rgba(255, 255, 255, 0.95) !important;
+    border-bottom: 1px solid #e2e8f0 !important;
+    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03);
+}
+
+html:not(.dark) header h1 {
+    color: #0f172a !important;
+}
+
+html:not(.dark) header nav {
+    background-color: #f1f5f9 !important;
+    border-color: #e2e8f0 !important;
+}
+
+.view-tab {
+    transition: all 0.15s ease-in-out;
+}
+
+.view-tab:not(.active) {
+    background-color: transparent !important;
+    box-shadow: none !important;
+}
+
+html.dark .view-tab:not(.active) {
+    color: #94a3b8 !important;
+    background-color: transparent !important;
+}
+
+html.dark .view-tab:not(.active):hover {
+    color: #ffffff !important;
+    background-color: rgba(51, 65, 85, 0.5) !important;
+}
+
+html.dark .view-tab.active {
+    background-color: #2563eb !important;
+    color: #ffffff !important;
+    box-shadow: 0 1px 3px rgba(37, 99, 235, 0.3) !important;
+}
+
+html:not(.dark) .view-tab {
+    color: #64748b !important;
+}
+
+html:not(.dark) .view-tab:not(.active) {
+    background-color: transparent !important;
+    color: #64748b !important;
+    box-shadow: none !important;
+}
+
+html:not(.dark) .view-tab:not(.active):hover {
+    color: #0f172a !important;
+    background-color: #e2e8f0 !important;
+}
+
+html:not(.dark) .view-tab.active {
+    background-color: #2563eb !important;
+    color: #ffffff !important;
+    box-shadow: 0 1px 3px rgba(37, 99, 235, 0.3) !important;
+}
+
+/* Top Action Buttons */
+html:not(.dark) header button:not(.view-tab):not(.bg-blue-600) {
+    background-color: #ffffff !important;
+    border: 1px solid #e2e8f0 !important;
+    color: #334155 !important;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03) !important;
+}
+
+html:not(.dark) header button:not(.view-tab):not(.bg-blue-600):hover {
+    background-color: #f8fafc !important;
+    color: #0f172a !important;
+    border-color: #cbd5e1 !important;
+}
+
+html:not(.dark) #streak-header-badge {
+    background-color: #fffbeb !important;
+    border: 1px solid #fef08a !important;
+    color: #b45309 !important;
+}
+
+html:not(.dark) #user-header-section {
+    border-color: #e2e8f0 !important;
+}
+
+html:not(.dark) #user-header-section div {
+    background-color: #ffffff !important;
+    border: 1px solid #e2e8f0 !important;
+    color: #334155 !important;
+}
+
+html:not(.dark) #current-username-display {
+    color: #0f172a !important;
+}
+
+/* Container Surfaces, Cards & Control Bars */
+html:not(.dark) .bg-slate-900\/60,
+html:not(.dark) .bg-slate-900 {
+    background-color: #ffffff !important;
+    border-color: #e2e8f0 !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03) !important;
+}
+
+html:not(.dark) .border-slate-800\/80,
+html:not(.dark) .border-slate-800,
+html:not(.dark) .border-slate-700,
+html:not(.dark) .border-slate-700\/60 {
+    border-color: #e2e8f0 !important;
+}
+
+/* Navigator Buttons (Prev/Next Month) */
+html:not(.dark) #view-matrix button.bg-slate-800,
+html:not(.dark) #view-today button.bg-slate-800 {
+    background-color: #f1f5f9 !important;
+    border: 1px solid #e2e8f0 !important;
+    color: #334155 !important;
+}
+
+html:not(.dark) #view-matrix button.bg-slate-800:hover,
+html:not(.dark) #view-today button.bg-slate-800:hover {
+    background-color: #e2e8f0 !important;
+    color: #0f172a !important;
+}
+
+/* Select Dropdowns in Light Mode */
+html:not(.dark) select {
+    background-color: #ffffff !important;
+    color: #0f172a !important;
+    border: 1px solid #cbd5e1 !important;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03) !important;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23475569' stroke-width='2.2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E") !important;
+}
+
+html:not(.dark) select:hover {
+    background-color: #f8fafc !important;
+    border-color: #94a3b8 !important;
+}
+
+html:not(.dark) select:focus {
+    border-color: #3b82f6 !important;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2) !important;
+}
+
+html:not(.dark) select option {
+    background-color: #ffffff !important;
+    color: #0f172a !important;
+}
+
+/* Matrix Table in Light Mode */
+html:not(.dark) #matrix-table {
+    color: #0f172a !important;
+}
+
+html:not(.dark) #matrix-table thead {
+    background-color: #f8fafc !important;
+}
+
+html:not(.dark) .sticky-top-left,
+html:not(.dark) .sticky-header,
+html:not(.dark) .sticky-summary-header {
+    background-color: #f8fafc !important;
+    border-color: #e2e8f0 !important;
+    color: #0f172a !important;
+}
+
+html:not(.dark) .sticky-header .text-\[10px\] {
+    color: #64748b !important;
+}
+
+html:not(.dark) .sticky-header .text-xs {
+    color: #0f172a !important;
+}
+
+html:not(.dark) .sticky-top-left span.text-amber-400 {
+    color: #b45309 !important;
+}
+
+html:not(.dark) .sticky-top-left span.text-slate-400 {
+    background-color: #e2e8f0 !important;
+    color: #475569 !important;
+}
+
+/* Goal Row (Warm Soft Amber) */
+html:not(.dark) tr.goal-row,
+html:not(.dark) .sticky-goal-left,
+html:not(.dark) .sticky-goal-cell,
+html:not(.dark) .sticky-goal-summary {
+    background-color: #fffbeb !important;
+    border-color: #fef08a !important;
+    color: #92400e !important;
+}
+
+html:not(.dark) tr.goal-row span.text-amber-400 {
+    color: #b45309 !important;
+}
+
+html:not(.dark) tr.goal-row span.text-amber-500\/80 {
+    background-color: #fef3c7 !important;
+    color: #92400e !important;
+}
+
+/* Full Day Row (Warm Soft Peach/Apricot) */
+html:not(.dark) tr.fullday-row,
+html:not(.dark) .sticky-fullday-left,
+html:not(.dark) .sticky-fullday-cell,
+html:not(.dark) .sticky-fullday-summary {
+    background-color: #fff7ed !important;
+    border-color: #fed7aa !important;
+    color: #9a3412 !important;
+}
+
+html:not(.dark) tr.fullday-row span.text-amber-300 {
+    color: #c2410c !important;
+}
+
+html:not(.dark) tr.fullday-row span.text-amber-400\/80 {
+    background-color: #ffedd5 !important;
+    color: #9a3412 !important;
+}
+
+/* Regular Habit Rows in Light Mode */
+html:not(.dark) .sticky-col {
+    background-color: #ffffff !important;
+    border-color: #e2e8f0 !important;
+    color: #0f172a !important;
+}
+
+html:not(.dark) .sticky-summary-col {
+    background-color: #ffffff !important;
+    border-color: #e2e8f0 !important;
+    color: #0f172a !important;
+}
+
+html:not(.dark) td.matrix-day-cell {
+    border-color: #f1f5f9 !important;
+    background-color: #ffffff;
+}
+
+html:not(.dark) tr.hover\:bg-slate-800\/30:hover td,
+html:not(.dark) #matrix-tbody tr:not(.subtask-row):hover td {
+    background-color: #f8fafc !important;
+}
+
+html:not(.dark) #matrix-tbody tr:not(.subtask-row) .font-bold {
+    color: #0f172a !important;
+}
+
+html:not(.dark) #matrix-tbody tr:not(.subtask-row) .text-\[10px\] {
+    color: #64748b !important;
+}
+
+/* Subtask Rows in Light Mode */
+html:not(.dark) tr.subtask-row td {
+    height: 32px !important;
+    min-height: 32px !important;
+    max-height: 32px !important;
+    background-color: #f8fafc !important;
+    border-color: #f1f5f9 !important;
+}
+
+html:not(.dark) tr.subtask-row td.sticky-col {
+    background-color: #f8fafc !important;
+    border-left: 3px solid #3b82f6 !important;
+    border-right-color: #e2e8f0 !important;
+}
+
+html:not(.dark) tr.subtask-row td.sticky-summary-col {
+    background-color: #f8fafc !important;
+    border-left-color: #e2e8f0 !important;
+}
+
+html:not(.dark) tr.subtask-row:hover td,
+html:not(.dark) tr.subtask-row:hover td.sticky-col,
+html:not(.dark) tr.subtask-row:hover td.sticky-summary-col {
+    background-color: #f1f5f9 !important;
+}
+
+html:not(.dark) tr.subtask-row span {
+    color: #334155 !important;
+}
+
+/* Weekend & Today in Light Mode */
+html:not(.dark) .weekend-header {
+    background: #fef3c7 !important;
+    color: #b45309 !important;
+    border-color: #fde68a !important;
+}
+
+html:not(.dark) .weekend-cell {
+    background-color: #fffdf5 !important;
+}
+
+html:not(.dark) .today-header {
+    background: #eff6ff !important;
+    box-shadow: inset 2px 0 0 #2563eb, inset -2px 0 0 #2563eb !important;
+    color: #1d4ed8 !important;
+}
+
+html:not(.dark) .today-cell {
+    background-color: rgba(37, 99, 235, 0.05) !important;
+    box-shadow: none !important;
+}
+
+/* Checkboxes in Light Mode */
+html:not(.dark) .matrix-checkbox {
+    border: 2px solid #cbd5e1;
+    background-color: #ffffff;
+}
+
+html:not(.dark) .matrix-checkbox:hover:not(:disabled) {
+    border-color: #3b82f6;
+    background-color: #eff6ff;
+}
+
+/* Modals & Inputs in Light Mode */
+html:not(.dark) #task-modal > div,
+html:not(.dark) #categories-modal > div,
+html:not(.dark) #backup-modal > div,
+html:not(.dark) #auth-modal > div {
+    background-color: #ffffff !important;
+    border-color: #e2e8f0 !important;
+    color: #0f172a !important;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.15) !important;
+}
+
+html:not(.dark) #task-modal h3,
+html:not(.dark) #categories-modal h3,
+html:not(.dark) #backup-modal h3,
+html:not(.dark) #auth-modal h3 {
+    color: #0f172a !important;
+}
+
+html:not(.dark) #task-modal label,
+html:not(.dark) #categories-modal label,
+html:not(.dark) #auth-modal label {
+    color: #334155 !important;
+}
+
+html:not(.dark) input[type="text"],
+html:not(.dark) input[type="password"] {
+    background-color: #f8fafc !important;
+    border: 1px solid #cbd5e1 !important;
+    color: #0f172a !important;
+}
+
+html:not(.dark) input[type="text"]:focus,
+html:not(.dark) input[type="password"]:focus {
+    background-color: #ffffff !important;
+    border-color: #3b82f6 !important;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2) !important;
+}
+
+html:not(.dark) #task-type-selector-group > div {
+    background-color: #f1f5f9 !important;
+    border-color: #e2e8f0 !important;
+}
+
+html:not(.dark) #task-parent-info {
+    background-color: #eff6ff !important;
+    border-color: #bfdbfe !important;
+    color: #1e40af !important;
+}
+
+html:not(.dark) #task-parent-info strong {
+    color: #1e3a8a !important;
+}
+
+html:not(.dark) #new-cat-name {
+    background-color: #f8fafc !important;
+    border-color: #cbd5e1 !important;
+    color: #0f172a !important;
+}
+
+/* Today View in Light Mode */
+html:not(.dark) #view-today .bg-gradient-to-br {
+    background: linear-gradient(135deg, #eff6ff 0%, #ffffff 100%) !important;
+    border-color: #bfdbfe !important;
+}
+
+html:not(.dark) #today-header-date,
+html:not(.dark) #today-progress-stats {
+    color: #0f172a !important;
+}
+
+html:not(.dark) #today-checklist-container > div {
+    background-color: #ffffff !important;
+    border-color: #e2e8f0 !important;
+}
+
+html:not(.dark) #today-checklist-container > div:hover {
+    border-color: #cbd5e1 !important;
+}
+
+html:not(.dark) #today-checklist-container .text-white {
+    color: #0f172a !important;
+}
+
+html:not(.dark) #today-checklist-container .bg-slate-950\/60 {
+    background-color: #f8fafc !important;
+    border-left-color: #3b82f6 !important;
+}
+
+/* Heatmap & Yearly Stats in Light Mode */
+html:not(.dark) #view-heatmap > div,
+html:not(.dark) #view-yearly > div,
+html:not(.dark) #view-yearly .bg-slate-900 {
+    background-color: #ffffff !important;
+    border-color: #e2e8f0 !important;
+}
+
+html:not(.dark) .day-cell-empty {
+    background-color: #e2e8f0 !important;
+}
+
+html:not(.dark) #view-yearly .text-white,
+html:not(.dark) #view-heatmap .text-white {
+    color: #0f172a !important;
+}
+
+html:not(.dark) #stat-current-streak,
+html:not(.dark) #stat-longest-streak {
+    color: #d97706 !important;
+}
+
+html:not(.dark) #stat-active-days {
+    color: #2563eb !important;
+}
+
+html:not(.dark) #stat-total-actions {
+    color: #059669 !important;
+}
+
+/* =========================================================================
+   CONSISTENCY HEATMAP CELL THEMES (DARK & LIGHT)
+   ========================================================================= */
+
+/* Dark Mode Heatmap Activity Levels */
+.heatmap-cell-0 {
+    background-color: #1e293b !important;
+    border: 1px solid rgba(51, 65, 85, 0.4) !important;
+}
+.heatmap-cell-1 {
+    background-color: #064e3b !important;
+}
+.heatmap-cell-2 {
+    background-color: #047857 !important;
+}
+.heatmap-cell-3 {
+    background-color: #059669 !important;
+}
+.heatmap-cell-4 {
+    background-color: #10b981 !important;
+    box-shadow: 0 0 6px rgba(16, 185, 129, 0.45) !important;
+}
+
+/* Light Mode Heatmap Activity Levels (Soft, aesthetic GitHub style) */
+html:not(.dark) .heatmap-cell-0 {
+    background-color: #ebedf0 !important;
+    border: 1px solid rgba(27, 31, 35, 0.08) !important;
+}
+html:not(.dark) .heatmap-cell-1 {
+    background-color: #9be9a8 !important;
+}
+html:not(.dark) .heatmap-cell-2 {
+    background-color: #40c463 !important;
+}
+html:not(.dark) .heatmap-cell-3 {
+    background-color: #30a14e !important;
+}
+html:not(.dark) .heatmap-cell-4 {
+    background-color: #216e39 !important;
+    box-shadow: 0 0 4px rgba(33, 110, 57, 0.3) !important;
 }
 
 /* Heatmap Tooltip */

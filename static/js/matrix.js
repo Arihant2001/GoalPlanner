@@ -88,22 +88,113 @@ async function loadMatrix() {
     }
 }
 
+// --- Subtask Collapse State Helper ---
+function getCollapsedSubtaskSet() {
+    try {
+        const raw = localStorage.getItem("goalplanner_collapsed_subtasks");
+        return new Set(raw ? JSON.parse(raw) : []);
+    } catch (e) {
+        return new Set();
+    }
+}
+
+function setCollapsedSubtaskSet(set) {
+    try {
+        localStorage.setItem("goalplanner_collapsed_subtasks", JSON.stringify([...set]));
+    } catch (e) {}
+}
+
+window.toggleParentSubtasks = function(parentId, event) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+    const collapsed = getCollapsedSubtaskSet();
+    if (collapsed.has(parentId)) {
+        collapsed.delete(parentId);
+    } else {
+        collapsed.add(parentId);
+    }
+    setCollapsedSubtaskSet(collapsed);
+    if (currentMatrixData) {
+        renderMatrix(currentMatrixData);
+    }
+    if (window.loadTodayChecklist && window.state && window.state.activeView === "today") {
+        window.loadTodayChecklist();
+    }
+};
+
+// --- Responsive Column Geometry Helper ---
+function computeResponsiveColumnWidths(numDays) {
+    const wrapper = document.getElementById("matrix-scroll-wrapper") || document.getElementById("view-matrix");
+    const containerWidth = wrapper ? wrapper.clientWidth : (window.innerWidth - 64);
+
+    const minTaskWidth = 155;
+    const minDayWidth = 30;
+    const minTotalWidth = 48;
+    const minNeeded = minTaskWidth + (numDays * minDayWidth) + minTotalWidth;
+
+    if (containerWidth >= minNeeded && containerWidth > 768) {
+        const available = containerWidth - 2;
+        let taskWidth = Math.min(200, Math.max(155, Math.floor(available * 0.145)));
+        let totalWidth = Math.min(56, Math.max(48, Math.floor(available * 0.045)));
+        let remaining = available - taskWidth - totalWidth;
+        let dayWidth = Math.floor(remaining / numDays);
+
+        if (dayWidth > 38) {
+            dayWidth = 38;
+            taskWidth = Math.min(220, available - (numDays * dayWidth) - totalWidth);
+        }
+
+        return {
+            taskCol: `${taskWidth}px`,
+            dayCol: `${dayWidth}px`,
+            totalCol: `${totalWidth}px`,
+            fitsScreen: true
+        };
+    } else {
+        return {
+            taskCol: "160px",
+            dayCol: "33px",
+            totalCol: "50px",
+            fitsScreen: false
+        };
+    }
+}
+
+// Debounced Window Resize Handler for Matrix
+let matrixResizeTimer = null;
+window.addEventListener("resize", () => {
+    clearTimeout(matrixResizeTimer);
+    matrixResizeTimer = setTimeout(() => {
+        if (currentMatrixData && (!window.state || window.state.activeView === "matrix")) {
+            renderMatrix(currentMatrixData);
+        }
+    }, 150);
+});
+
 function renderMatrix(data) {
     const table = document.getElementById("matrix-table");
     const numDays = data.num_days;
     const days = data.days;
     const taskRows = data.matrix;
-    const regularHabits = taskRows.filter(r => !r.is_goal && !r.is_full_day);
+    const regularHabits = taskRows.filter(r => !r.is_goal && !r.is_full_day && !r.task.parent_id);
+
+    const widths = computeResponsiveColumnWidths(numDays);
+    table.style.setProperty("--task-col-width", widths.taskCol);
+    table.style.setProperty("--day-col-width", widths.dayCol);
+    table.style.setProperty("--total-col-width", widths.totalCol);
+    table.style.width = widths.fitsScreen ? "100%" : "max-content";
 
     let html = "";
 
-    // 0. COLGROUP: Explicit Column Geometry
+    // 0. COLGROUP: Responsive Column Geometry
     html += `<colgroup>`;
-    html += `<col style="width: 220px; min-width: 220px; max-width: 220px;">`;
+    html += `<col style="width: ${widths.taskCol}; min-width: ${widths.taskCol}; max-width: ${widths.taskCol};">`;
     days.forEach(() => {
-        html += `<col style="width: 36px; min-width: 36px; max-width: 36px;">`;
+        html += `<col style="width: ${widths.dayCol}; min-width: ${widths.dayCol}; max-width: ${widths.dayCol};">`;
     });
-    html += `<col style="width: 70px; min-width: 70px; max-width: 70px;">`;
+    html += `<col style="width: ${widths.totalCol}; min-width: ${widths.totalCol}; max-width: ${widths.totalCol};">`;
     html += `</colgroup>`;
 
     // 1. THEAD: Header Block (Date Headers + Goal + Full Day)
@@ -112,10 +203,10 @@ function renderMatrix(data) {
     // Row 1: Date Headers
     html += `<tr class="bg-slate-900 border-b border-slate-800">`;
     html += `
-        <th class="sticky-top-left bg-slate-900 border-r border-b border-slate-800 p-2.5 text-xs font-bold text-slate-300">
-            <div class="flex items-center justify-between">
-                <span class="text-amber-400 font-extrabold tracking-wide uppercase">${data.month_name.slice(0, 3)} ${data.year}</span>
-                <span class="text-[10px] text-slate-400 px-1.5 py-0.5 rounded bg-slate-800 font-medium">${regularHabits.length} Habits</span>
+        <th class="sticky-top-left bg-slate-900 border-r border-b border-slate-800 px-2 py-2 text-xs font-bold text-slate-300" style="border-left: 3.5px solid transparent !important;">
+            <div class="flex items-center justify-between gap-1">
+                <span class="text-amber-400 font-extrabold tracking-wide uppercase truncate">${data.month_name.slice(0, 3)} ${data.year}</span>
+                <span class="text-[10px] text-slate-400 px-1.5 py-0.5 rounded bg-slate-800 font-medium whitespace-nowrap">${regularHabits.length} Habits</span>
             </div>
         </th>
     `;
@@ -130,7 +221,7 @@ function renderMatrix(data) {
         `;
     });
     html += `
-        <th class="sticky-summary-header bg-slate-900 border-l border-b border-slate-800 p-2 text-center text-xs font-bold text-slate-300">
+        <th class="sticky-summary-header bg-slate-900 border-l border-b border-slate-800 p-1 text-center text-xs font-bold text-slate-300">
             Total
         </th>
     </tr>`;
@@ -146,26 +237,26 @@ function renderMatrix(data) {
         const leftStickyClass = isGoalTask ? "sticky-goal-left border-r border-b border-slate-800" : "sticky-fullday-left border-r border-b-2 border-slate-700/80";
         const cellStickyClass = isGoalTask ? "sticky-goal-cell border-r border-b border-slate-800/60" : "sticky-fullday-cell border-r border-b-2 border-slate-700/80";
         const rightStickyClass = isGoalTask ? "sticky-goal-summary border-l border-b border-slate-800" : "sticky-fullday-summary border-l border-b-2 border-slate-700/80";
+        const leftBorderColor = isGoalTask ? "#eab308" : "#f59e0b";
 
         html += `<tr id="task-row-${task.id}" class="${rowClass} transition-colors group select-none" data-task-id="${task.id}" data-row-index="${rowIndex}" ondragover="onFixedRowDragOver(event)" ondragleave="onFixedRowDragLeave(event)" ondrop="onFixedRowDrop(event)">`;
 
-        // Left Sticky Cell: Task Title, Icon & Meta
+        // Left Sticky Cell: Task Title, Icon & Meta with vertical line accent on leftmost edge
         html += `
-            <td class="${leftStickyClass} p-2.5 transition-colors">
-                <div class="flex items-center justify-between gap-1.5">
-                    <div class="flex items-center gap-2 overflow-hidden flex-1">
-                        <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background-color: ${task.color || (isGoalTask ? '#eab308' : '#f59e0b')}"></span>
-                        <div class="truncate flex-1">
-                            <span class="font-bold text-xs sm:text-sm ${isGoalTask ? 'text-amber-400 font-black flex items-center gap-1' : 'text-amber-300 font-bold flex items-center gap-1'}">
-                                ${isGoalTask ? '<i data-lucide="target" class="w-3.5 h-3.5 text-amber-400 inline"></i>' : '<i data-lucide="sun" class="w-3.5 h-3.5 text-amber-400 inline"></i>'}
-                                ${task.title}
+            <td class="${leftStickyClass} px-2 py-2 transition-colors" style="border-left: 3.5px solid ${leftBorderColor} !important;">
+                <div class="flex items-center justify-between gap-1">
+                    <div class="flex items-center gap-1.5 overflow-hidden flex-1 min-w-0">
+                        <div class="truncate flex-1 min-w-0">
+                            <span class="font-bold text-xs sm:text-sm truncate flex items-center gap-1.5 ${isGoalTask ? 'text-amber-400 font-black' : 'text-amber-300 font-bold'}">
+                                ${isGoalTask ? '<i data-lucide="target" class="w-3.5 h-3.5 text-amber-400 inline flex-shrink-0"></i>' : '<i data-lucide="sun" class="w-3.5 h-3.5 text-amber-400 inline flex-shrink-0"></i>'}
+                                <span class="truncate">${task.title}</span>
                             </span>
                         </div>
                     </div>
                     ${isGoalTask ? `
-                    <span class="text-[10px] text-amber-500/80 px-1 py-0.5 rounded bg-amber-500/10 font-medium" title="Auto-ticks when target is met or Full Day is checked">Auto</span>
+                    <span class="text-[10px] text-amber-500/80 px-1 py-0.5 rounded bg-amber-500/10 font-medium flex-shrink-0" title="Auto-ticks when target is met or Full Day is checked">Auto</span>
                     ` : `
-                    <span class="text-[10px] text-amber-400/80 px-1 py-0.5 rounded bg-amber-400/10 font-medium" title="If checked with >=1 task done, Goal counts as achieved">1-Task</span>
+                    <span class="text-[10px] text-amber-400/80 px-1 py-0.5 rounded bg-amber-400/10 font-medium flex-shrink-0" title="If checked with >=1 task done, Goal counts as achieved">1-Task</span>
                     `}
                 </div>
             </td>
@@ -224,9 +315,8 @@ function renderMatrix(data) {
 
         // Right Summary Cell
         html += `
-            <td id="row-total-${rowIndex}" class="${rightStickyClass} p-2 text-center text-xs font-semibold text-slate-200">
-                <span class="font-bold ${isGoalTask ? 'text-amber-400' : 'text-amber-500'} text-sm">${row.total_completed}</span>
-                <span class="text-slate-500 text-[11px] font-normal">/${numDays}</span>
+            <td id="row-total-${rowIndex}" class="${rightStickyClass} p-1 text-center text-xs font-semibold text-slate-200 whitespace-nowrap">
+                <span class="font-bold ${isGoalTask ? 'text-amber-400' : 'text-amber-500'} text-xs">${row.total_completed}</span><span class="text-slate-500 text-[10px] font-normal">/${numDays}</span>
             </td>
         </tr>`;
     });
@@ -243,6 +333,15 @@ function renderMatrix(data) {
         if (isGoalTask || isFullDayTask) return; // Already rendered in thead!
 
         const isSubtask = Boolean(row.is_subtask || task.parent_id);
+        const collapsedSet = getCollapsedSubtaskSet();
+        const isParentCollapsed = isSubtask && task.parent_id && collapsedSet.has(task.parent_id);
+        const hiddenClass = isParentCollapsed ? "hidden" : "";
+
+        // Check if this parent has subtasks
+        const subtasks = !isSubtask ? taskRows.filter(r => r.task.parent_id === task.id) : [];
+        const hasSubtasks = subtasks.length > 0;
+        const isCollapsed = hasSubtasks && collapsedSet.has(task.id);
+
         const rowClass = isSubtask ? "subtask-row select-none" : "hover:bg-slate-800/30 select-none";
         const leftStickyClass = isSubtask 
             ? "sticky-col border-r border-b border-slate-800/60" 
@@ -257,28 +356,40 @@ function renderMatrix(data) {
             ? `draggable="true" data-task-id="${task.id}" data-row-index="${rowIndex}" ondragstart="onTaskDragStart(event)" ondragover="onTaskDragOver(event)" ondragleave="onTaskDragLeave(event)" ondrop="onTaskDrop(event)" ondragend="onTaskDragEnd(event)"` 
             : `data-task-id="${task.id}" data-row-index="${rowIndex}"`;
 
-        html += `<tr id="task-row-${task.id}" class="${rowClass} transition-colors group" ${draggableAttr}>`;
+        html += `<tr id="task-row-${task.id}" class="${rowClass} ${hiddenClass} transition-colors group" ${draggableAttr}>`;
 
-        // Left Sticky Cell: Task Title, Grip Handle & Meta
+        // Left Sticky Cell: Task Title, Grip Handle, Collapse Toggle & Meta with category vertical line on leftmost edge
+        const taskBorderColor = task.color || (isSubtask ? '#60a5fa' : '#3b82f6');
         html += `
-            <td class="${leftStickyClass} p-2.5 transition-colors">
-                <div class="flex items-center justify-between gap-1.5">
-                    <div class="flex items-center gap-2 overflow-hidden flex-1 ${isSubtask ? 'pl-6' : ''}">
+            <td class="${leftStickyClass} px-2 py-2 transition-colors" style="border-left: 3.5px solid ${taskBorderColor} !important;">
+                <div class="flex items-center justify-between gap-1">
+                    <div class="flex items-center gap-1.5 overflow-hidden flex-1 min-w-0 ${isSubtask ? 'pl-4' : ''}">
                         ${isDraggable ? `
-                        <div class="drag-handle p-1 text-slate-500 hover:text-white rounded transition-colors flex items-center justify-center opacity-40 group-hover:opacity-100" title="Drag to reorder task position">
+                        <div class="drag-handle p-1 text-slate-500 hover:text-white rounded transition-colors flex items-center justify-center opacity-40 group-hover:opacity-100 flex-shrink-0" title="Drag to reorder task position">
                             <i data-lucide="grip-vertical" class="w-3.5 h-3.5"></i>
                         </div>
                         ` : ''}
                         ${isSubtask ? `<i data-lucide="corner-down-right" class="w-3.5 h-3.5 text-blue-400/80 flex-shrink-0"></i>` : ''}
-                        <span class="${isSubtask ? 'w-2 h-2' : 'w-2.5 h-2.5'} rounded-full flex-shrink-0" style="background-color: ${task.color || (isSubtask ? '#60a5fa' : '#3b82f6')}"></span>
-                        <div class="truncate flex-1">
-                            <span class="${isSubtask ? 'text-xs text-slate-300 font-normal leading-tight block truncate' : 'font-bold text-xs sm:text-sm text-slate-100'}">
-                                ${task.title}
-                            </span>
-                            ${!isSubtask ? `<span class="text-[10px] text-slate-400 block truncate">${task.category || 'General'}</span>` : ''}
+                        <div class="truncate flex-1 min-w-0">
+                            <div class="flex items-center gap-1 truncate">
+                                <span class="${isSubtask ? 'text-xs text-slate-300 font-normal leading-tight truncate' : 'font-bold text-xs sm:text-sm text-slate-100 truncate'}">
+                                    ${task.title}
+                                </span>
+                                ${hasSubtasks ? `
+                                <button type="button" draggable="false" onclick="toggleParentSubtasks(${task.id}, event)" class="p-0.5 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition-colors flex items-center justify-center flex-shrink-0" title="${isCollapsed ? `Expand ${subtasks.length} subtask${subtasks.length > 1 ? 's' : ''}` : `Collapse ${subtasks.length} subtask${subtasks.length > 1 ? 's' : ''}`}">
+                                    <i data-lucide="${isCollapsed ? 'chevron-right' : 'chevron-down'}" class="w-3.5 h-3.5 text-slate-400 hover:text-blue-400"></i>
+                                </button>
+                                ` : ''}
+                                ${hasSubtasks && isCollapsed ? `
+                                <span onclick="toggleParentSubtasks(${task.id}, event)" class="cursor-pointer text-[10px] px-1.5 py-0.2 rounded-full bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 font-medium select-none flex-shrink-0" title="${subtasks.length} subtask${subtasks.length > 1 ? 's' : ''} hidden (click to expand)">
+                                    ${subtasks.length} sub
+                                </span>
+                                ` : ''}
+                            </div>
+                            ${!isSubtask ? `<span class="text-[10px] text-slate-400 block truncate leading-none mt-0.5">${task.category || 'General'}</span>` : ''}
                         </div>
                     </div>
-                    <div class="flex items-center gap-0.5">
+                    <div class="flex items-center gap-0.5 flex-shrink-0">
                         ${!isSubtask ? `
                         <button draggable="false" onclick='openAddSubtaskModal(${task.id}, "${task.title.replace(/"/g, '&quot;')}")' class="opacity-0 group-hover:opacity-100 p-1 hover:text-emerald-400 text-slate-400 rounded transition-all" title="Add Subtask">
                             <i data-lucide="plus" class="w-3.5 h-3.5"></i>
@@ -319,9 +430,8 @@ function renderMatrix(data) {
 
         // Right Sticky Cell: Row Total with fraction (e.g. 4/31)
         html += `
-            <td id="row-total-${rowIndex}" class="${rightStickyClass} p-2 text-center text-xs font-semibold text-slate-200">
-                <span class="font-bold text-white text-sm">${row.total_completed}</span>
-                <span class="text-slate-500 text-[11px] font-normal">/${numDays}</span>
+            <td id="row-total-${rowIndex}" class="${rightStickyClass} p-1 text-center text-xs font-semibold text-slate-200 whitespace-nowrap">
+                <span class="font-bold text-white text-xs">${row.total_completed}</span><span class="text-slate-500 text-[10px] font-normal">/${numDays}</span>
             </td>
         `;
 
