@@ -32,7 +32,7 @@
     </script>
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
-    <link rel="stylesheet" href="/static/css/style.css?v=4.4">
+    <link rel="stylesheet" href="/static/css/style.css?v=4.5">
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col font-sans transition-colors duration-200">
 
@@ -96,12 +96,13 @@
                     <i id="theme-icon" data-lucide="sun" class="w-4 h-4 text-amber-400"></i>
                 </button>
 
-                <!-- User Profile & Log Out -->
-                <div id="user-header-section" class="hidden items-center gap-2 pl-2 border-l border-slate-800">
-                    <div class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-800/90 text-xs text-slate-300 font-medium border border-slate-700/60 shadow-sm">
+                <!-- User Profile & Account Actions -->
+                <div id="user-header-section" class="hidden items-center gap-1.5 pl-2 border-l border-slate-800">
+                    <button onclick="openChangePasswordModal()" class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700/80 text-xs text-slate-300 font-medium border border-slate-700/60 shadow-sm transition-all group" title="Account settings: Click to change password">
                         <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
                         <span id="current-username-display" class="font-bold text-white max-w-[110px] truncate">User</span>
-                    </div>
+                        <i data-lucide="key" class="w-3.5 h-3.5 text-slate-400 group-hover:text-amber-400 transition-colors ml-0.5"></i>
+                    </button>
                     <button onclick="handleAuthLogout()" class="p-2 rounded-xl bg-slate-800 hover:bg-red-500/20 text-slate-400 hover:text-red-400 border border-slate-700/60 transition-all" title="Sign Out">
                         <i data-lucide="log-out" class="w-4 h-4"></i>
                     </button>
@@ -537,6 +538,61 @@
         </div>
     </div>
 
+    <!-- Change Password Modal -->
+    <div id="password-modal" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm hidden flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-sm w-full p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-200">
+            <!-- Modal Header -->
+            <div class="flex items-center justify-between">
+                <h3 class="text-base font-bold text-white flex items-center gap-2">
+                    <div class="p-2 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                        <i data-lucide="key" class="w-4 h-4"></i>
+                    </div>
+                    Change Password
+                </h3>
+                <button type="button" onclick="closeChangePasswordModal()" class="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors">
+                    <i data-lucide="x" class="w-4 h-4"></i>
+                </button>
+            </div>
+
+            <!-- Error Notification Box -->
+            <div id="password-error-box" class="hidden p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs flex items-center gap-2">
+                <i data-lucide="alert-circle" class="w-4 h-4 flex-shrink-0 text-red-400"></i>
+                <span id="password-error-text"></span>
+            </div>
+
+            <!-- Success Notification Box -->
+            <div id="password-success-box" class="hidden p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-center gap-2">
+                <i data-lucide="check-circle" class="w-4 h-4 flex-shrink-0 text-emerald-400"></i>
+                <span id="password-success-text"></span>
+            </div>
+
+            <!-- Form -->
+            <form id="change-password-form" onsubmit="handleAuthChangePassword(event)" class="space-y-3.5">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 mb-1">Current Password *</label>
+                    <input type="password" id="change-current-password" required placeholder="••••••••" autocomplete="current-password" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 mb-1">New Password *</label>
+                    <input type="password" id="change-new-password" required placeholder="at least 6 characters" autocomplete="new-password" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 mb-1">Confirm New Password *</label>
+                    <input type="password" id="change-confirm-password" required placeholder="re-enter new password" autocomplete="new-password" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500">
+                </div>
+                <div class="flex items-center justify-end gap-2 pt-2">
+                    <button type="button" onclick="closeChangePasswordModal()" class="px-3.5 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800 transition-colors">
+                        Cancel
+                    </button>
+                    <button type="submit" id="change-password-submit-btn" class="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 font-bold text-xs text-slate-950 shadow-md shadow-amber-500/20 transition-all active:scale-95 flex items-center gap-1.5">
+                        <i data-lucide="check" class="w-3.5 h-3.5"></i>
+                        <span>Update Password</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- Authentication Modal (Sign In / Sign Up) -->
     <div id="auth-modal" class="fixed inset-0 z-[100] bg-black/85 backdrop-blur-md hidden flex items-center justify-center p-4">
         <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-sm w-full p-6 sm:p-7 shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-200">
@@ -617,9 +673,9 @@
     <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
 
     <!-- App Scripts -->
-    <script src="/static/js/app.js?v=4.4"></script>
-    <script src="/static/js/matrix.js?v=4.4"></script>
-    <script src="/static/js/heatmap.js?v=4.4"></script>
+    <script src="/static/js/app.js?v=4.5"></script>
+    <script src="/static/js/matrix.js?v=4.5"></script>
+    <script src="/static/js/heatmap.js?v=4.5"></script>
     <script>
         document.addEventListener("DOMContentLoaded", () => {
             lucide.createIcons();

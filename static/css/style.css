@@ -651,7 +651,8 @@ html:not(.dark) .matrix-checkbox:hover:not(:disabled) {
 html:not(.dark) #task-modal > div,
 html:not(.dark) #categories-modal > div,
 html:not(.dark) #backup-modal > div,
-html:not(.dark) #auth-modal > div {
+html:not(.dark) #auth-modal > div,
+html:not(.dark) #password-modal > div {
     background-color: #ffffff !important;
     border-color: #e2e8f0 !important;
     color: #0f172a !important;
@@ -661,13 +662,15 @@ html:not(.dark) #auth-modal > div {
 html:not(.dark) #task-modal h3,
 html:not(.dark) #categories-modal h3,
 html:not(.dark) #backup-modal h3,
-html:not(.dark) #auth-modal h3 {
+html:not(.dark) #auth-modal h3,
+html:not(.dark) #password-modal h3 {
     color: #0f172a !important;
 }
 
 html:not(.dark) #task-modal label,
 html:not(.dark) #categories-modal label,
-html:not(.dark) #auth-modal label {
+html:not(.dark) #auth-modal label,
+html:not(.dark) #password-modal label {
     color: #334155 !important;
 }
 

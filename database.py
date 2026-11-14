@@ -249,6 +249,22 @@ def get_user_by_id(user_id):
     conn.close()
     return dict(row) if row else None
 
+def get_user_password_hash(user_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT password_hash FROM users WHERE id = ?", (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return row["password_hash"] if row else None
+
+def update_user_password(user_id, password_hash):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET password_hash = ? WHERE id = ?", (password_hash, user_id))
+    conn.commit()
+    conn.close()
+    return True
+
 def seed_user_defaults(user_id, conn=None):
     should_close = False
     if conn is None:

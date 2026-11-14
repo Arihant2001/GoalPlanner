@@ -10,6 +10,8 @@ import database
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "goalplanner-secret-key-2026")
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=3650)  # 10 years persistent login
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
 # Initialize SQLite database schema and migrations on startup
 database.init_db()
@@ -90,6 +92,32 @@ def auth_login():
 def auth_logout():
     session.clear()
     return jsonify({"success": True, "message": "Logged out successfully"})
+
+@app.route("/api/auth/change-password", methods=["POST"])
+@login_required
+def auth_change_password():
+    data = request.get_json() or {}
+    current_password = data.get("current_password", "").strip()
+    new_password = data.get("new_password", "").strip()
+    confirm_new_password = data.get("confirm_new_password", "").strip()
+    
+    if not current_password:
+        return jsonify({"success": False, "error": "Current password is required."}), 400
+    if not new_password or len(new_password) < 6:
+        return jsonify({"success": False, "error": "New password must be at least 6 characters long."}), 400
+    if new_password != confirm_new_password:
+        return jsonify({"success": False, "error": "New passwords do not match."}), 400
+    if current_password == new_password:
+        return jsonify({"success": False, "error": "New password must be different from current password."}), 400
+        
+    user_id = session["user_id"]
+    current_hash = database.get_user_password_hash(user_id)
+    if not current_hash or not check_password_hash(current_hash, current_password):
+        return jsonify({"success": False, "error": "Incorrect current password."}), 400
+        
+    new_hash = generate_password_hash(new_password)
+    database.update_user_password(user_id, new_hash)
+    return jsonify({"success": True, "message": "Password changed successfully!"})
 
 # ----------------- Categories Endpoints ----------------- #
 

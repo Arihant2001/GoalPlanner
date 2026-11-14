@@ -177,8 +177,80 @@ def run_tests():
     print(f"PASS: User 1 has {expected_main_habits} main habits and {total_with_subtasks} total tasks (including subtasks)")
     print("PASS: Subtasks are strictly excluded from habits counting in stats and matrix!")
 
+    # 11. Test Change Password Endpoint & Security
+    unauth_client = app.test_client()
+    res = unauth_client.post('/api/auth/change-password', json={
+        'current_password': 'any',
+        'new_password': 'newpassword123',
+        'confirm_new_password': 'newpassword123'
+    })
+    assert res.status_code == 401, "Unauthenticated change-password must return 401"
+    print("PASS: Unauthenticated change password properly blocked with 401")
+
+    # Wrong current password
+    res = client.post('/api/auth/change-password', json={
+        'current_password': 'wrongpassword',
+        'new_password': 'newpassword123',
+        'confirm_new_password': 'newpassword123'
+    })
+    assert res.status_code == 400
+    assert "Incorrect current password" in res.get_json()['error']
+    print("PASS: Incorrect current password rejected with 400")
+
+    # Mismatched passwords
+    res = client.post('/api/auth/change-password', json={
+        'current_password': u1_password,
+        'new_password': 'newpassword123',
+        'confirm_new_password': 'mismatched123'
+    })
+    assert res.status_code == 400
+    assert "do not match" in res.get_json()['error']
+    print("PASS: Mismatched new passwords rejected with 400")
+
+    # Identical password
+    res = client.post('/api/auth/change-password', json={
+        'current_password': u1_password,
+        'new_password': u1_password,
+        'confirm_new_password': u1_password
+    })
+    assert res.status_code == 400
+    assert "different" in res.get_json()['error']
+    print("PASS: Same password rejected with 400")
+
+    # Valid change
+    new_test_pw = 'brandnewpassword456'
+    res = client.post('/api/auth/change-password', json={
+        'current_password': u1_password,
+        'new_password': new_test_pw,
+        'confirm_new_password': new_test_pw
+    })
+    assert res.status_code == 200, f"Expected 200, got {res.status_code}: {res.get_json()}"
+    assert res.get_json()['success'] is True
+    print("PASS: Valid password update succeeded with 200")
+
+    # Test that login now requires the new password
+    fresh_client = app.test_client()
+    # Old password fails
+    res = fresh_client.post('/api/auth/login', json={'username': 'arihant_test', 'password': u1_password})
+    assert res.status_code == 401
+    print("PASS: Old password rejected upon login")
+
+    # New password succeeds
+    res = fresh_client.post('/api/auth/login', json={'username': 'arihant_test', 'password': new_test_pw})
+    assert res.status_code == 200
+    print("PASS: New password successfully authenticated user")
+
+    # Reset password back to u1_password for idempotency in subsequent test runs
+    res = fresh_client.post('/api/auth/change-password', json={
+        'current_password': new_test_pw,
+        'new_password': u1_password,
+        'confirm_new_password': u1_password
+    })
+    assert res.status_code == 200
+    print("PASS: Password restored back to original for idempotency")
+
     print("\n=========================================")
-    print(" ALL 10 MULTI-USER & REGRESSION TESTS PASSED 100%! ")
+    print(" ALL 11 MULTI-USER & REGRESSION TESTS PASSED 100%! ")
     print("=========================================\n")
 
 if __name__ == '__main__':

@@ -197,6 +197,115 @@ async function handleAuthLogout() {
     }
 }
 
+function openChangePasswordModal() {
+    const modal = document.getElementById("password-modal");
+    if (!modal) return;
+    
+    // Clear inputs and alert boxes
+    const currInput = document.getElementById("change-current-password");
+    const newInput = document.getElementById("change-new-password");
+    const confInput = document.getElementById("change-confirm-password");
+    if (currInput) currInput.value = "";
+    if (newInput) newInput.value = "";
+    if (confInput) confInput.value = "";
+    
+    const errBox = document.getElementById("password-error-box");
+    if (errBox) errBox.classList.add("hidden");
+    const succBox = document.getElementById("password-success-box");
+    if (succBox) succBox.classList.add("hidden");
+    
+    modal.classList.remove("hidden");
+    setTimeout(() => {
+        if (currInput) currInput.focus();
+    }, 50);
+}
+
+function closeChangePasswordModal() {
+    const modal = document.getElementById("password-modal");
+    if (modal) modal.classList.add("hidden");
+}
+
+async function handleAuthChangePassword(event) {
+    event.preventDefault();
+    const currentPassword = (document.getElementById("change-current-password")?.value || "").trim();
+    const newPassword = (document.getElementById("change-new-password")?.value || "").trim();
+    const confirmPassword = (document.getElementById("change-confirm-password")?.value || "").trim();
+    
+    const errBox = document.getElementById("password-error-box");
+    const errText = document.getElementById("password-error-text");
+    const succBox = document.getElementById("password-success-box");
+    const succText = document.getElementById("password-success-text");
+    const btn = document.getElementById("change-password-submit-btn");
+    
+    if (errBox) errBox.classList.add("hidden");
+    if (succBox) succBox.classList.add("hidden");
+    
+    if (!currentPassword) {
+        if (errBox && errText) {
+            errText.textContent = "Please enter your current password.";
+            errBox.classList.remove("hidden");
+        }
+        return;
+    }
+    if (!newPassword || newPassword.length < 6) {
+        if (errBox && errText) {
+            errText.textContent = "New password must be at least 6 characters.";
+            errBox.classList.remove("hidden");
+        }
+        return;
+    }
+    if (newPassword !== confirmPassword) {
+        if (errBox && errText) {
+            errText.textContent = "New passwords do not match.";
+            errBox.classList.remove("hidden");
+        }
+        return;
+    }
+    if (currentPassword === newPassword) {
+        if (errBox && errText) {
+            errText.textContent = "New password must be different from current password.";
+            errBox.classList.remove("hidden");
+        }
+        return;
+    }
+    
+    if (btn) btn.disabled = true;
+    try {
+        const res = await fetch("/api/auth/change-password", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                current_password: currentPassword,
+                new_password: newPassword,
+                confirm_new_password: confirmPassword
+            })
+        });
+        const json = await res.json();
+        if (json.success) {
+            if (succBox && succText) {
+                succText.textContent = json.message || "Password updated successfully!";
+                succBox.classList.remove("hidden");
+            }
+            showToast("Password updated successfully!", "success");
+            setTimeout(() => {
+                closeChangePasswordModal();
+            }, 1200);
+        } else {
+            if (errBox && errText) {
+                errText.textContent = json.error || "Failed to update password.";
+                errBox.classList.remove("hidden");
+            }
+        }
+    } catch (err) {
+        if (errBox && errText) {
+            errText.textContent = "Network error. Please try again.";
+            errBox.classList.remove("hidden");
+        }
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
 function initStateFromUI() {
     const monthSelect = document.getElementById("matrix-month-select");
     const yearSelect = document.getElementById("matrix-year-select");
@@ -1170,3 +1279,6 @@ window.handleAuthLogin = handleAuthLogin;
 window.handleAuthRegister = handleAuthRegister;
 window.handleAuthLogout = handleAuthLogout;
 window.showAuthModal = showAuthModal;
+window.openChangePasswordModal = openChangePasswordModal;
+window.closeChangePasswordModal = closeChangePasswordModal;
+window.handleAuthChangePassword = handleAuthChangePassword;
