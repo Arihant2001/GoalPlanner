@@ -370,8 +370,11 @@ def import_data():
         except Exception as e:
             return jsonify({"success": False, "error": f"Invalid JSON file: {str(e)}"}), 400
             
-    database.import_backup(session["user_id"], data)
-    return jsonify({"success": True, "message": "Backup imported successfully"})
+    try:
+        database.import_backup(session["user_id"], data)
+        return jsonify({"success": True, "message": "Backup imported successfully"})
+    except Exception as e:
+        return jsonify({"success": False, "error": f"Failed to restore backup: {str(e)}"}), 500
 
 # ----------------- PWA Files ----------------- #
 

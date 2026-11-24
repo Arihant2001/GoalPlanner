@@ -1199,7 +1199,11 @@ async function handleBackupImport() {
             method: "POST",
             body: formData
         });
-        const data = await res.json();
+        const data = await res.json().catch(() => null);
+        if (!data) {
+            showToast(`Server returned error (${res.status})`, "error");
+            return;
+        }
         if (data.success) {
             showToast("Backup restored successfully!", "success");
             closeBackupModal();

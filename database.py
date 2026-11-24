@@ -1261,6 +1261,7 @@ def import_backup(user_id: int, data_dict: dict):
     conn = get_connection()
     cursor = conn.cursor()
     
+    # 1. Categories (UNIQUE(user_id, name))
     if "categories" in data_dict:
         for c in data_dict["categories"]:
             cursor.execute("""
@@ -1270,35 +1271,89 @@ def import_backup(user_id: int, data_dict: dict):
             
     color_map = {c["name"]: c["color"] for c in data_dict.get("categories", [])}
     
-    if "tasks" in data_dict:
-        for t in data_dict["tasks"]:
-            cat = t.get("category", "General")
-            col = color_map.get(cat, t.get("color", "#3b82f6"))
+    # 2. Tasks & Subtasks with ID Mapping
+    # Fetch existing tasks for this user (e.g. Goal and Full Day seeded on registration)
+    cursor.execute("SELECT id, title, parent_id FROM tasks WHERE user_id = ?", (user_id,))
+    existing_rows = cursor.fetchall()
+    existing_tasks_by_title = {r["title"].strip().lower(): r["id"] for r in existing_rows if not r["parent_id"]}
+    
+    task_id_map = {}  # old_id -> new_id
+    
+    raw_tasks = data_dict.get("tasks", [])
+    # Separate parent/main tasks and subtasks
+    main_tasks = [t for t in raw_tasks if not t.get("parent_id")]
+    sub_tasks = [t for t in raw_tasks if t.get("parent_id")]
+    
+    # Insert or map main tasks
+    for t in main_tasks:
+        old_id = t["id"]
+        title = t.get("title", "").strip()
+        lower_title = title.lower()
+        cat = t.get("category", "General")
+        col = color_map.get(cat, t.get("color", "#3b82f6"))
+        
+        # If task with this title already exists for this user (e.g. 'Goal' or 'Full Day'), reuse it!
+        if lower_title in existing_tasks_by_title:
+            new_id = existing_tasks_by_title[lower_title]
             cursor.execute("""
-            INSERT INTO tasks (user_id, title, category, color, icon, target_frequency, sort_order, is_archived)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (user_id, t.get("title"), cat, col,
+            UPDATE tasks SET category = ?, color = ?, icon = ?, target_frequency = ?, sort_order = ?, is_archived = ?
+            WHERE id = ? AND user_id = ?
+            """, (cat, col, t.get("icon", "check-circle"), t.get("target_frequency", "daily"),
+                  t.get("sort_order", 0), t.get("is_archived", 0), new_id, user_id))
+            task_id_map[old_id] = new_id
+        else:
+            cursor.execute("""
+            INSERT INTO tasks (user_id, title, category, color, icon, target_frequency, sort_order, is_archived, parent_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
+            """, (user_id, title, cat, col,
                   t.get("icon", "check-circle"), t.get("target_frequency", "daily"),
                   t.get("sort_order", 0), t.get("is_archived", 0)))
-                  
+            new_id = cursor.lastrowid
+            task_id_map[old_id] = new_id
+            existing_tasks_by_title[lower_title] = new_id
+            
+    # Insert subtasks (using re-mapped parent_id)
+    for t in sub_tasks:
+        old_id = t["id"]
+        title = t.get("title", "").strip()
+        old_parent_id = t.get("parent_id")
+        new_parent_id = task_id_map.get(old_parent_id)
+        cat = t.get("category", "General")
+        col = color_map.get(cat, t.get("color", "#3b82f6"))
+        
+        cursor.execute("""
+        INSERT INTO tasks (user_id, title, category, color, icon, target_frequency, sort_order, is_archived, parent_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (user_id, title, cat, col,
+              t.get("icon", "check-circle"), t.get("target_frequency", "daily"),
+              t.get("sort_order", 0), t.get("is_archived", 0), new_parent_id))
+        task_id_map[old_id] = cursor.lastrowid
+        
+    # 3. Completions (Mapped to new task IDs!)
     if "completions" in data_dict:
         for c in data_dict["completions"]:
+            old_task_id = c["task_id"]
+            new_task_id = task_id_map.get(old_task_id)
+            if not new_task_id:
+                continue  # Skip if task couldn't be resolved
             cursor.execute("""
-            INSERT INTO completions (user_id, task_id, date, completed, notes)
+            INSERT OR REPLACE INTO completions (user_id, task_id, date, completed, notes)
             VALUES (?, ?, ?, ?, ?)
-            """, (user_id, c["task_id"], c["date"], c.get("completed", 1), c.get("notes", "")))
+            """, (user_id, new_task_id, c["date"], c.get("completed", 1), c.get("notes", "")))
             
+    # 4. Settings (UNIQUE(user_id, key))
     if "settings" in data_dict:
         for s in data_dict["settings"]:
             cursor.execute("""
-            INSERT INTO settings (user_id, key, value)
+            INSERT OR REPLACE INTO settings (user_id, key, value)
             VALUES (?, ?, ?)
             """, (user_id, s["key"], s["value"]))
             
+    # 5. Daily Summaries (UNIQUE(user_id, date))
     if "daily_summaries" in data_dict:
         for s in data_dict["daily_summaries"]:
             cursor.execute("""
-            INSERT INTO daily_summaries (user_id, date, daily_goal_achieved, focus_note)
+            INSERT OR REPLACE INTO daily_summaries (user_id, date, daily_goal_achieved, focus_note)
             VALUES (?, ?, ?, ?)
             """, (user_id, s["date"], s.get("daily_goal_achieved", 0), s.get("focus_note", "")))
             

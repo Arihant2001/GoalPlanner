@@ -249,8 +249,22 @@ def run_tests():
     assert res.status_code == 200
     print("PASS: Password restored back to original for idempotency")
 
+    # 12. Test Safe Backup Export and Import
+    # Export from User 1
+    res = fresh_client.get('/api/export?format=json')
+    assert res.status_code == 200
+    export_json = res.get_json()
+    assert 'tasks' in export_json and 'categories' in export_json
+    print(f"PASS: Exported backup for User 1 ({len(export_json['tasks'])} tasks)")
+
+    # Import into User 2 via /api/import
+    res = client2.post('/api/import', json=export_json)
+    assert res.status_code == 200, f"Import failed: {res.get_json()}"
+    assert res.get_json()['success'] is True
+    print("PASS: Successfully imported backup into User 2 via API!")
+
     print("\n=========================================")
-    print(" ALL 11 MULTI-USER & REGRESSION TESTS PASSED 100%! ")
+    print(" ALL 12 MULTI-USER & REGRESSION TESTS PASSED 100%! ")
     print("=========================================\n")
 
 if __name__ == '__main__':
